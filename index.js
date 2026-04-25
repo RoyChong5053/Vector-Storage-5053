@@ -17,7 +17,6 @@ import {
     extension_settings,
     getContext,
     modules,
-    renderExtensionTemplateAsync,
     doExtrasFetch, getApiUrl,
     openThirdPartyExtensionMenu,
 } from "../../../extensions.js";
@@ -1865,9 +1864,10 @@ jQuery(async () => {
     // Migrate from TensorFlow to Transformers
     settings.source = settings.source !== 'local' ? settings.source : 'transformers';
 
-    // Load settings UI template
-    const template = await renderExtensionTemplateAsync(MODULE_NAME, 'settings');
-    $('#vectors_container').append(template);
+    // Load settings HTML directly into extensions container
+    const settingsHtml = await fetch('settings.html')
+        .then(r => r.text());
+    $('#extensions_settings2').append(settingsHtml);
 
     // LanceDB toggle
     $('#vectors_use_lancedb').prop('checked', settings.useLanceDB).on('input', () => {
