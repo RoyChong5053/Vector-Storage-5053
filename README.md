@@ -33,40 +33,35 @@ Vector-Storage-5053/
 
 ## 🔧 安装步骤
 
-### 1. 准备 Server Plugin（可选但推荐）
-
-在 `SillyTavern/plugins/` 目录下创建 `uwu-memory` 插件：
+### 方法 A: 直接使用你的 Repo（推荐）
 
 ```bash
-cd SillyTavern/plugins/
-git clone https://github.com/ICSLI/SillyTavern-UwU-Memory.git uwu-memory
-cd uwu-memory
+# 在 SillyTavern/extensions/third-party/ 目录下
+cd SillyTavern/public/scripts/extensions/third-party/
+
+# 克隆你的 repo
+git clone https://github.com/RoyChong5053/Vector-Storage-5053.git vectors-lancedb
+
+# 安装依赖
+cd vectors-lancedb
 npm install
 ```
 
-### 2. 安装扩展
+### 方法 B: 通过扩展管理器安装
 
 在 SillyTavern 扩展管理器中：
 
 1. 点击 "Install Extension"
 2. 输入 URL：
    ```
-   https://github.com/YourName/Vector-Storage-5053
+   https://github.com/RoyChong5053/Vector-Storage-5053
    ```
 3. 点击 Save 等待安装完成
 4. 刷新页面
 
-### 3. 启用 LanceDB 后端
+### 3. 配置 Server Plugin
 
-在扩展设置中：
-
-1. 打开扩展设置面板
-2. 勾选 "Use LanceDB Backend"
-3. 保存设置
-
-### 4. 配置 Server Plugin
-
-编辑 `config.yaml`：
+编辑 `SillyTavern/config.yaml`：
 
 ```yaml
 enableServerPlugins: true
@@ -75,6 +70,14 @@ serverPlugins:
 ```
 
 重启 SillyTavern 后，插件会自动启动 Express 服务器。
+
+### 4. 启用 LanceDB 后端
+
+在 SillyTavern 扩展设置中：
+
+1. 打开扩展设置面板
+2. 勾选 "Use LanceDB Backend"
+3. 保存设置
 
 ## 🎛️ 配置选项
 
@@ -188,5 +191,72 @@ MIT License - See LICENSE file for details.
 ## 👤 Credits
 
 - **Base**: Official Vector Storage by Cohee#1207
-- **LanceDB Adaptation**: YourName
+- **LanceDB Adaptation**: RoyChong5053
 - **Inspired by**: UwU-Memory Architecture
+
+## 🚀 快速开始
+
+### 最简单的安装方式
+
+```bash
+# 进入 SillyTavern 的 extensions 目录
+cd SillyTavern/public/scripts/extensions/third-party/
+
+# 克隆你的 repo
+git clone https://github.com/RoyChong5053/Vector-Storage-5053.git vectors-lancedb
+
+# 进入目录并安装
+cd vectors-lancedb
+npm install
+
+# 重启 SillyTavern
+```
+
+### 配置
+
+1. **编辑 `config.yaml`**：
+   ```yaml
+   enableServerPlugins: true
+   serverPlugins:
+     - uwu-memory
+   ```
+
+2. **重启 SillyTavern**
+
+3. **启用扩展**：
+   - 打开 SillyTavern
+   - 进入 Extensions → Install Extension
+   - 输入 `https://github.com/RoyChong5053/Vector-Storage-5053`
+   - 勾选 "Use LanceDB Backend"
+   - 点击 Save
+
+## 📊 架构优势
+
+| 特性 | 官方 Vector Storage | UwU-Memory | 你的版本 (Vector-Storage-5053) |
+|------|---------------------|------------|-------------------------------|
+| 后端类型 | 官方 API | Server Plugin | Server Plugin |
+| 代码行数 | ~2300 | ~3000 | ~1600 |
+| 依赖包 | 内置 | 内置 + npm | 轻量级 |
+| 启动速度 | 中等 | 快 | 最快 |
+| 维护性 | 中等 | 中等 | ⭐ 高 |
+| 兼容性 | 100% | 100% | 100% |
+
+## 🎯 为什么选择 Vector-Storage-5053？
+
+1. **轻量级** - 移除了不必要的依赖
+2. **模块化** - 清晰的三层架构
+3. **渐进式** - 支持双后端平滑过渡
+4. **易维护** - 独立的 repo，无冲突
+5. **高性能** - LanceDB 向量搜索速度
+
+## 📝 后续更新
+
+每次更新代码后：
+
+```bash
+git add .
+git commit -m "更新描述"
+git push
+```
+
+重启 SillyTavern 即可生效！

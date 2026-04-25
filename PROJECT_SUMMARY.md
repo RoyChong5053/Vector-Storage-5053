@@ -76,7 +76,7 @@ serverPlugins:
 在 SillyTavern 扩展管理器中：
 
 1. 点击 "Install Extension"
-2. 输入 URL: `https://github.com/YourName/Vector-Storage-5053`
+2. 输入 URL: `https://github.com/RoyChong5053/Vector-Storage-5053`
 3. 点击 Save
 4. 刷新页面
 
