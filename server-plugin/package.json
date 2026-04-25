@@ -1,0 +1,13 @@
+{
+  "name": "vector-storage-server-plugin",
+  "version": "1.0.0",
+  "description": "LanceDB server plugin for Vector Storage",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

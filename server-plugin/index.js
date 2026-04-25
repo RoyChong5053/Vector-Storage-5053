@@ -1,13 +1,10 @@
 /**
- * Server-side plugin for Vector Storage - LanceDB Edition
- * 
- * This plugin exposes LanceDB API endpoints for the browser extension to use.
- * It provides a lightweight Express-based server that handles vector storage operations.
+ * Vector Storage Server Plugin
+ * LanceDB backend for SillyTavern Vector Storage extension
  */
 
 import express from 'express';
-import { lanceDB } from './lancedb-server.js';
-import { VectorStorage } from './vector-storage-server.js';
+import { lanceDB, VectorStorage } from './lancedb-server.js';
 
 const app = express();
 const PORT = 3001;
@@ -16,14 +13,29 @@ const PORT = 3001;
 app.use(express.json());
 
 /**
- * Health check endpoint
+ * CORS headers for development
+ */
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    next();
+});
+
+/**
+ * Health check
  */
 app.get('/api/plugins/uwu-memory/health', async (req, res) => {
     try {
-        const backend = await lanceDB();
+        const db = await lanceDB();
+        const backend = db ? 'lancedb' : 'unavailable';
         res.json({
-            backend: 'lancedb',
-            version: '0.11.0',
+            backend,
+            version: '1.0.0',
+            status: db ? 'connected' : 'disconnected',
         });
     } catch (error) {
         res.status(500).json({
@@ -38,231 +50,195 @@ app.get('/api/plugins/uwu-memory/health', async (req, res) => {
 app.post('/api/plugins/uwu-memory/insert', async (req, res) => {
     try {
         const { collectionId, items } = req.body;
-        
-        if (!collectionId || !Array.isArray(items) || items.length === 0) {
-            res.status(400).json({
-                error: 'Invalid request body',
-            });
-            return;
+
+        if (!collectionId) {
+            return res.status(400).json({ error: 'collectionId is required' });
+        }
+        if (!Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ error: 'items must be a non-empty array' });
         }
 
-        // Process items
-        const processedItems = items.map(item => ({
-            hash: item.hash,
-            text: item.text,
-            index: item.index,
-            metadata: item.metadata || {},
-        }));
-
-        // Insert into LanceDB
         const storage = await VectorStorage.create();
-        await storage.insert(collectionId, processedItems);
+        const inserted = await storage.insert(collectionId, items);
 
-        res.json({
-            inserted: processedItems.length,
-        });
+        res.json({ success: true, inserted });
     } catch (error) {
-        res.status(500).json({
-            error: error.message,
-        });
+        console.error('[VectorStorage] Insert error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
 /**
- * Query vectors
+ * Query vectors (similarity search)
  */
 app.post('/api/plugins/uwu-memory/query', async (req, res) => {
     try {
-        const { collectionId, queryText, topK, threshold } = req.body;
+        const { collectionId, queryText, topK = 10, threshold = 0.0 } = req.body;
 
-        if (!collectionId || !queryText) {
-            res.status(400).json({
-                error: 'Invalid request body',
-            });
-            return;
+        if (!collectionId) {
+            return res.status(400).json({ error: 'collectionId is required' });
+        }
+        if (!queryText) {
+            return res.status(400).json({ error: 'queryText is required' });
         }
 
-        // Query from LanceDB
         const storage = await VectorStorage.create();
         const results = await storage.query(collectionId, queryText, topK, threshold);
 
-        res.json({
-            results,
-        });
+        res.json(results);
     } catch (error) {
-        res.status(500).json({
-            error: error.message,
-        });
+        console.error('[VectorStorage] Query error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
 /**
- * List hashes
+ * List hashes in collection
  */
 app.post('/api/plugins/uwu-memory/list', async (req, res) => {
     try {
         const { collectionId } = req.body;
 
         if (!collectionId) {
-            res.status(400).json({
-                error: 'Invalid request body',
-            });
-            return;
+            return res.status(400).json({ error: 'collectionId is required' });
         }
 
-        // List hashes from LanceDB
         const storage = await VectorStorage.create();
         const hashes = await storage.list(collectionId);
 
-        res.json({
-            hashes,
-        });
+        res.json({ hashes });
     } catch (error) {
-        res.status(500).json({
-            error: error.message,
-        });
+        console.error('[VectorStorage] List error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
 /**
- * Delete vectors
+ * Delete vectors by hash
  */
 app.post('/api/plugins/uwu-memory/delete', async (req, res) => {
     try {
         const { collectionId, hashes } = req.body;
 
-        if (!collectionId || !Array.isArray(hashes) || hashes.length === 0) {
-            res.status(400).json({
-                error: 'Invalid request body',
-            });
-            return;
+        if (!collectionId) {
+            return res.status(400).json({ error: 'collectionId is required' });
+        }
+        if (!Array.isArray(hashes) || hashes.length === 0) {
+            return res.status(400).json({ error: 'hashes must be a non-empty array' });
         }
 
-        // Delete from LanceDB
         const storage = await VectorStorage.create();
-        await storage.delete(collectionId, hashes);
+        const deleted = await storage.delete(collectionId, hashes);
 
-        res.json({
-            deleted: hashes.length,
-        });
+        res.json({ success: true, deleted });
     } catch (error) {
-        res.status(500).json({
-            error: error.message,
-        });
+        console.error('[VectorStorage] Delete error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
 /**
- * Purge collection
+ * Purge entire collection
  */
 app.post('/api/plugins/uwu-memory/purge', async (req, res) => {
     try {
         const { collectionId } = req.body;
 
         if (!collectionId) {
-            res.status(400).json({
-                error: 'Invalid request body',
-            });
-            return;
+            return res.status(400).json({ error: 'collectionId is required' });
         }
 
-        // Purge from LanceDB
         const storage = await VectorStorage.create();
         await storage.purge(collectionId);
 
-        res.json({
-            success: true,
-        });
+        res.json({ success: true });
     } catch (error) {
-        res.status(500).json({
-            error: error.message,
-        });
+        console.error('[VectorStorage] Purge error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
 /**
- * Get by hashes
+ * Get items by hashes
  */
 app.post('/api/plugins/uwu-memory/getByHashes', async (req, res) => {
     try {
         const { collectionId, hashes } = req.body;
 
-        if (!collectionId || !Array.isArray(hashes) || hashes.length === 0) {
-            res.status(400).json({
-                error: 'Invalid request body',
-            });
-            return;
+        if (!collectionId) {
+            return res.status(400).json({ error: 'collectionId is required' });
+        }
+        if (!Array.isArray(hashes) || hashes.length === 0) {
+            return res.status(400).json({ error: 'hashes must be a non-empty array' });
         }
 
-        // Get by hashes from LanceDB
         const storage = await VectorStorage.create();
         const items = await storage.getByHashes(collectionId, hashes);
 
-        res.json({
-            items,
-        });
+        res.json({ items });
     } catch (error) {
-        res.status(500).json({
-            error: error.message,
-        });
+        console.error('[VectorStorage] GetByHashes error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
 /**
- * Purge all
+ * Query multiple collections at once
+ */
+app.post('/api/plugins/uwu-memory/query-multi', async (req, res) => {
+    try {
+        const { collectionIds, queryText, topK = 10, threshold = 0.0 } = req.body;
+
+        if (!Array.isArray(collectionIds) || collectionIds.length === 0) {
+            return res.status(400).json({ error: 'collectionIds must be a non-empty array' });
+        }
+        if (!queryText) {
+            return res.status(400).json({ error: 'queryText is required' });
+        }
+
+        const storage = await VectorStorage.create();
+        const results = await storage.queryMultipleCollections(collectionIds, queryText, topK, threshold);
+
+        res.json(results);
+    } catch (error) {
+        console.error('[VectorStorage] QueryMulti error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * Purge all collections
  */
 app.post('/api/plugins/uwu-memory/purge-all', async (req, res) => {
     try {
         const storage = await VectorStorage.create();
         await storage.purgeAll();
 
-        res.json({
-            success: true,
-        });
+        res.json({ success: true });
     } catch (error) {
-        res.status(500).json({
-            error: error.message,
-        });
+        console.error('[VectorStorage] PurgeAll error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
 /**
- * Query multi (for batch queries)
+ * Start server
  */
-app.post('/api/vector/query-multi', async (req, res) => {
-    try {
-        const { collectionIds, searchText, topK, threshold } = req.body;
-
-        if (!Array.isArray(collectionIds) || !searchText) {
-            res.status(400).json({
-                error: 'Invalid request body',
-            });
-            return;
-        }
-
-        // Query multiple collections
-        const storage = await VectorStorage.create();
-        const results = await storage.queryMultipleCollections(
-            collectionIds,
-            searchText,
-            topK,
-            threshold
-        );
-
-        res.json({
-            results,
-        });
-    } catch (error) {
-        res.status(500).json({
-            error: error.message,
-        });
-    }
+const HOST = process.env.HOST || 'localhost';
+const server = app.listen(PORT, HOST, () => {
+    console.log(`[VectorStorage] Server listening on ${HOST}:${PORT}`);
+    console.log(`[VectorStorage] API available at http://${HOST}:${PORT}/api/plugins/uwu-memory/`);
 });
 
-// Start server
-app.listen(PORT, () => {
-    console.log(`[Vectors-LanceDB] Server listening on port ${PORT}`);
-    console.log(`[Vectors-LanceDB] API available at http://localhost:${PORT}/api/plugins/uwu-memory/`);
+/**
+ * Graceful shutdown
+ */
+process.on('SIGTERM', () => {
+    console.log('[VectorStorage] Shutting down...');
+    server.close(() => {
+        console.log('[VectorStorage] Server closed');
+        process.exit(0);
+    });
 });
 
 export { app };

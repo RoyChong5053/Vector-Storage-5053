@@ -1,23 +1,21 @@
 {
-  "name": "vectors-lancedb",
+  "name": "vector-storage-lancedb",
   "version": "1.0.0",
-  "description": "Vector Storage with built-in LanceDB support",
+  "description": "Vector Storage extension with LanceDB backend for SillyTavern",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "echo \"No tests configured\" && exit 0",
     "server": "node server-plugin/index.js"
   },
   "keywords": [
+    "sillytavern",
     "vector",
     "storage",
     "lancedb",
     "rag",
-    "sillytavern"
+    "embedding"
   ],
   "author": "RoyChong5053",
   "license": "MIT",
-  "dependencies": {},
-  "optionalDependencies": {
-    "@lancedb/lancedb": "^0.11.0"
-  }
+  "type": "module"
 }

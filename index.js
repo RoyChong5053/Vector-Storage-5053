@@ -38,6 +38,7 @@ import { generateWebLlmChatPrompt, isWebLlmSupported } from '../shared.js';
 import { WebLlmVectorProvider } from './webllm.js';
 import { removeReasoningFromString } from '../../reasoning.js';
 import { oai_settings } from '../../openai.js';
+import { LanceDBBackend } from './backends/lancedb-backend.js';
 
 /**
  * @typedef {object} HashedMessage
@@ -60,6 +61,7 @@ const settings = {
     alt_endpoint_url: '',
     use_alt_endpoint: false,
     include_wi: false,
+    useLanceDB: false,  // Enable LanceDB backend
     togetherai_model: 'togethercomputer/m2-bert-80M-32k-retrieval',
     openai_model: 'text-embedding-ada-002',
     electronhub_model: 'text-embedding-3-small',
@@ -871,10 +873,24 @@ async function getAdditionalArgs(items) {
 
 /**
  * Gets the saved hashes for a collection
-* @param {string} collectionId
-* @returns {Promise<number[]>} Saved hashes
-*/
+ * @param {string} collectionId
+ * @returns {Promise<number[]>} Saved hashes
+ */
 async function getSavedHashes(collectionId) {
+    // Try LanceDB backend first if enabled
+    if (settings.useLanceDB) {
+        try {
+            const hashes = await lancedbBackend.list(collectionId);
+            if (hashes.length > 0 || hashes.length === 0) {
+                console.debug('Vectors: Using LanceDB backend for list');
+                return hashes;
+            }
+        } catch (error) {
+            console.warn('Vectors: LanceDB list failed, falling back to API', error);
+        }
+    }
+
+    // Fallback to official API
     const args = await getAdditionalArgs([]);
     const response = await fetch('/api/vector/list', {
         method: 'POST',
@@ -890,8 +906,7 @@ async function getSavedHashes(collectionId) {
         throw new Error(`Failed to get saved hashes for collection ${collectionId}`);
     }
 
-    const hashes = await response.json();
-    return hashes;
+    return await response.json();
 }
 
 /**
@@ -901,6 +916,18 @@ async function getSavedHashes(collectionId) {
  * @returns {Promise<void>}
  */
 async function insertVectorItems(collectionId, items) {
+    // Try LanceDB backend first if enabled
+    if (settings.useLanceDB) {
+        try {
+            await lancedbBackend.insert(collectionId, items);
+            console.debug('Vectors: Using LanceDB backend for insert');
+            return;
+        } catch (error) {
+            console.warn('Vectors: LanceDB insert failed, falling back to API', error);
+        }
+    }
+
+    // Fallback to official API
     throwIfSourceInvalid();
 
     const args = await getAdditionalArgs(items.map(x => x.text));
@@ -972,6 +999,18 @@ function throwIfSourceInvalid() {
  * @returns {Promise<void>}
  */
 async function deleteVectorItems(collectionId, hashes) {
+    // Try LanceDB backend first if enabled
+    if (settings.useLanceDB) {
+        try {
+            await lancedbBackend.delete(collectionId, hashes);
+            console.debug('Vectors: Using LanceDB backend for delete');
+            return;
+        } catch (error) {
+            console.warn('Vectors: LanceDB delete failed, falling back to API', error);
+        }
+    }
+
+    // Fallback to official API
     const response = await fetch('/api/vector/delete', {
         method: 'POST',
         headers: getRequestHeaders(),
@@ -995,6 +1034,20 @@ async function deleteVectorItems(collectionId, hashes) {
  * @returns {Promise<{ hashes: number[], metadata: object[]}>} - Hashes of the results
  */
 async function queryCollection(collectionId, searchText, topK) {
+    // Try LanceDB backend first if enabled
+    if (settings.useLanceDB) {
+        try {
+            const results = await lancedbBackend.query(collectionId, searchText, topK, settings.score_threshold);
+            if (results) {
+                console.debug('Vectors: Using LanceDB backend for query');
+                return results;
+            }
+        } catch (error) {
+            console.warn('Vectors: LanceDB query failed, falling back to API', error);
+        }
+    }
+
+    // Fallback to official API
     const args = await getAdditionalArgs([searchText]);
     const response = await fetch('/api/vector/query', {
         method: 'POST',
@@ -1018,38 +1071,30 @@ async function queryCollection(collectionId, searchText, topK) {
 
 /**
  * Queries multiple collections for a given text.
- * @param {string[]} collectionIds - Collection IDs to query
- * @param {string} searchText - Text to query
- * @param {number} topK - Number of results to return
- * @param {number} threshold - Score threshold
- * @returns {Promise<Record<string, { hashes: number[], metadata: object[] }>>} - Results mapped to collection IDs
- */
-/**
- * Queries multiple collections for a given text.
  * @param {string[]} collectionIds - The collection IDs to query
  * @param {string} searchText - The text to query
  * @param {number} topK - The number of results to return
  * @param {number} threshold - The threshold to use
- * @returns {Promise<{ hashes: number[], metadata: object[]}>} - Hashes of the results
+ * @returns {Promise<Record<string, { hashes: number[], metadata: object[] }>>} - Results mapped to collection IDs
  */
 async function queryMultipleCollections(collectionIds, searchText, topK, threshold) {
-    // Check if using LanceDB backend
+    // Try LanceDB backend first if enabled
     if (settings.useLanceDB) {
         try {
-            // Try LanceDB backend first
             const results = await lancedbBackend.queryMultipleCollections(collectionIds, searchText, topK, threshold);
-            if (results.length > 0) {
-                console.log("Vectors: Using LanceDB backend");
+            if (results && Object.keys(results).length > 0) {
+                console.debug('Vectors: Using LanceDB backend for queryMultiple');
                 return results;
             }
         } catch (error) {
-            console.error("Vectors: LanceDB backend failed, falling back to API", error);
+            console.warn('Vectors: LanceDB queryMulti failed, falling back to API', error);
         }
     }
 
+    // Fallback to official API
     const args = await getAdditionalArgs([searchText]);
-    const response = await fetch("/api/vector/query-multi", {
-        method: "POST",
+    const response = await fetch('/api/vector/query-multi', {
+        method: 'POST',
         headers: getRequestHeaders(),
         body: JSON.stringify({
             ...getVectorsRequestBody(args),
@@ -1062,7 +1107,7 @@ async function queryMultipleCollections(collectionIds, searchText, topK, thresho
     });
 
     if (!response.ok) {
-        throw new Error("Failed to query multiple collections");
+        throw new Error('Failed to query multiple collections');
     }
 
     return await response.json();
@@ -1081,6 +1126,18 @@ async function purgeFileVectorIndex(fileUrl) {
         console.log(`Vectors: Purging file vector index for ${fileUrl}`);
         const collectionId = getFileCollectionId(fileUrl);
 
+        // Try LanceDB backend first if enabled
+        if (settings.useLanceDB) {
+            try {
+                await lancedbBackend.purge(collectionId);
+                console.debug('Vectors: Using LanceDB backend for purgeFile');
+                return;
+            } catch (error) {
+                console.warn('Vectors: LanceDB purge failed, falling back to API', error);
+            }
+        }
+
+        // Fallback to official API
         const response = await fetch('/api/vector/purge', {
             method: 'POST',
             headers: getRequestHeaders(),
@@ -1103,7 +1160,7 @@ async function purgeFileVectorIndex(fileUrl) {
 /**
  * Purges the vector index for a collection.
  * @param {string} collectionId Collection ID to purge
- * @returns <Promise<boolean>> True if deleted, false if not
+ * @returns {Promise<boolean>} True if deleted, false if not
  */
 async function purgeVectorIndex(collectionId) {
     try {
@@ -1111,6 +1168,18 @@ async function purgeVectorIndex(collectionId) {
             return true;
         }
 
+        // Try LanceDB backend first if enabled
+        if (settings.useLanceDB) {
+            try {
+                await lancedbBackend.purge(collectionId);
+                console.debug('Vectors: Using LanceDB backend for purgeVector');
+                return true;
+            } catch (error) {
+                console.warn('Vectors: LanceDB purge failed, falling back to API', error);
+            }
+        }
+
+        // Fallback to official API
         const response = await fetch('/api/vector/purge', {
             method: 'POST',
             headers: getRequestHeaders(),
@@ -1137,6 +1206,19 @@ async function purgeVectorIndex(collectionId) {
  */
 async function purgeAllVectorIndexes() {
     try {
+        // Try LanceDB backend first if enabled
+        if (settings.useLanceDB) {
+            try {
+                await lancedbBackend.purgeAll();
+                console.debug('Vectors: Using LanceDB backend for purgeAll');
+                toastr.success('All vector indexes purged (LanceDB)', 'Purge successful');
+                return;
+            } catch (error) {
+                console.warn('Vectors: LanceDB purgeAll failed, falling back to API', error);
+            }
+        }
+
+        // Fallback to official API
         const response = await fetch('/api/vector/purge-all', {
             method: 'POST',
             headers: getRequestHeaders(),
@@ -1220,301 +1302,16 @@ async function loadChutesModels() {
 
 function populateChutesModelSelect(models) {
     const select = $('#vectors_chutes_model');
-/**
- * Gets the saved hashes for a collection
- * @param {string} collectionId
- * @returns {Promise<number[]>} Saved hashes
- */
-async function getSavedHashes(collectionId) {
-    // Check if using LanceDB backend
-    if (settings.useLanceDB) {
-        try {
-            // Try LanceDB backend first
-            const hashes = await lancedbBackend.list(collectionId);
-            if (hashes.length > 0) {
-                console.log('Vectors: Using LanceDB backend');
-                return hashes;
-            }
-        } catch (error) {
-            console.error('Vectors: LanceDB backend failed, falling back to API', error);
-        }
+    select.empty();
+
+    if (models.length === 0) {
+        select.append($('<option>').text('No models available'));
+        return;
     }
 
-    // Fallback to official API
-    const args = await getAdditionalArgs([]);
-    const response = await fetch('/api/vector/list', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            ...getVectorsRequestBody(args),
-            collectionId: collectionId,
-            source: settings.source,
-        }),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to get saved hashes for collection ${collectionId}`);
-    }
-
-    const hashes = await response.json();
-    return hashes;
-}
-
-/**
- * Inserts vector items into a collection
- * @param {string} collectionId - The collection to insert into
- * @param {{ hash: number, text: string }[]} items - The items to insert
- * @returns {Promise<void>}
- */
-async function insertVectorItems(collectionId, items) {
-    // Check if using LanceDB backend
-    if (settings.useLanceDB) {
-        try {
-            // Try LanceDB backend first
-            await lancedbBackend.insert(collectionId, items);
-            console.log('Vectors: Using LanceDB backend');
-            return;
-        } catch (error) {
-            console.error('Vectors: LanceDB backend failed, falling back to API', error);
-        }
-    }
-
-    throwIfSourceInvalid();
-
-    const args = await getAdditionalArgs(items.map(x => x.text));
-    const response = await fetch('/api/vector/insert', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            ...getVectorsRequestBody(args),
-            collectionId: collectionId,
-            items: items,
-            source: settings.source,
-        }),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to insert vector items for collection ${collectionId}`);
-    }
-}
-
-/**
- * Deletes vector items from a collection
- * @param {string} collectionId - The collection to delete from
- * @param {number[]} hashes - The hashes of the items to delete
- * @returns {Promise<void>}
- */
-async function deleteVectorItems(collectionId, hashes) {
-    // Check if using LanceDB backend
-    if (settings.useLanceDB) {
-        try {
-            // Try LanceDB backend first
-            await lancedbBackend.delete(collectionId, hashes);
-            console.log('Vectors: Using LanceDB backend');
-            return;
-        } catch (error) {
-            console.error('Vectors: LanceDB backend failed, falling back to API', error);
-        }
-    }
-
-    const response = await fetch('/api/vector/delete', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            ...getVectorsRequestBody(),
-            collectionId: collectionId,
-            hashes: hashes,
-            source: settings.source,
-        }),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to delete vector items for collection ${collectionId}`);
-    }
-}
-
-/**
- * @param {string} collectionId - The collection to query
- * @param {string} searchText - The text to query
- * @param {number} topK - The number of results to return
- * @returns {Promise<{ hashes: number[], metadata: object[]}>} - Hashes of the results
- */
-async function queryCollection(collectionId, searchText, topK) {
-    // Check if using LanceDB backend
-    if (settings.useLanceDB) {
-        try {
-            // Try LanceDB backend first
-            const results = await lancedbBackend.query(collectionId, searchText, topK, settings.score_threshold);
-            if (results.length > 0) {
-                console.log('Vectors: Using LanceDB backend');
-                return results;
-            }
-        } catch (error) {
-            console.error('Vectors: LanceDB backend failed, falling back to API', error);
-        }
-    }
-
-    const args = await getAdditionalArgs([searchText]);
-    const response = await fetch('/api/vector/query', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            ...getVectorsRequestBody(args),
-            collectionId: collectionId,
-            searchText: searchText,
-            topK: topK,
-            source: settings.source,
-            threshold: settings.score_threshold,
-        }),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to query collection ${collectionId}`);
-    }
-
-    return await response.json();
-}
-
-/**
- * Queries multiple collections for a given text.
- * @param {string[]} collectionIds - The collection IDs to query
- * @param {string} searchText - The text to query
- * @param {number} topK - The number of results to return
- * @param {number} threshold - The threshold to use
- * @returns {Promise<{ hashes: number[], metadata: object[]}>} - Hashes of the results
- */
-async function queryMultipleCollections(collectionIds, searchText, topK, threshold) {
-    // Check if using LanceDB backend
-    if (settings.useLanceDB) {
-        try {
-            // Try LanceDB backend first
-            const results = await lancedbBackend.queryMultipleCollections(collectionIds, searchText, topK, threshold);
-            if (results.length > 0) {
-                console.log('Vectors: Using LanceDB backend');
-                return results;
-            }
-        } catch (error) {
-            console.error('Vectors: LanceDB backend failed, falling back to API', error);
-        }
-    }
-
-    const args = await getAdditionalArgs([searchText]);
-    const response = await fetch('/api/vector/query-multi', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            ...getVectorsRequestBody(args),
-            collectionIds: collectionIds,
-            searchText: searchText,
-            topK: topK,
-            source: settings.source,
-            threshold: threshold || settings.score_threshold,
-        }),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to query multiple collections`);
-    }
-
-    return await response.json();
-}
-
-/**
- * Purges file vector index
- * @param {string} fileUrl - The URL of the file
- * @returns {Promise<void>}
- */
-async function purgeFileVectorIndex(fileUrl) {
-    const collectionId = getFileCollectionId(fileUrl);
-
-    // Check if using LanceDB backend
-    if (settings.useLanceDB) {
-        try {
-            // Try LanceDB backend first
-            await lancedbBackend.purge(collectionId);
-            console.log('Vectors: Using LanceDB backend');
-            return;
-        } catch (error) {
-            console.error('Vectors: LanceDB backend failed, falling back to API', error);
-        }
-    }
-
-    const response = await fetch('/api/vector/purge', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            ...getVectorsRequestBody(),
-            collectionId: collectionId,
-            source: settings.source,
-        }),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to purge file vector index for ${fileUrl}`);
-    }
-}
-
-/**
- * Purges vector index
- * @param {string} collectionId - The collection ID to purge
- * @returns {Promise<void>}
- */
-async function purgeVectorIndex(collectionId) {
-    // Check if using LanceDB backend
-    if (settings.useLanceDB) {
-        try {
-            // Try LanceDB backend first
-            await lancedbBackend.purge(collectionId);
-            console.log('Vectors: Using LanceDB backend');
-            return;
-        } catch (error) {
-            console.error('Vectors: LanceDB backend failed, falling back to API', error);
-        }
-    }
-
-    const response = await fetch('/api/vector/purge', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            ...getVectorsRequestBody(),
-            collectionId: collectionId,
-            source: settings.source,
-        }),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to purge vector index for ${collectionId}`);
-    }
-}
-
-/**
- * Purges all vector indexes
- * @returns {Promise<void>}
- */
-async function purgeAllVectorIndexes() {
-    // Check if using LanceDB backend
-    if (settings.useLanceDB) {
-        try {
-            // Try LanceDB backend first
-            await lancedbBackend.purgeAll();
-            console.log('Vectors: Using LanceDB backend');
-            return;
-        } catch (error) {
-            console.error('Vectors: LanceDB backend failed, falling back to API', error);
-        }
-    }
-
-    const response = await fetch('/api/vector/purge-all', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            ...getVectorsRequestBody(),
-            source: settings.source,
-        }),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to purge all vector indexes`);
+    for (const model of models) {
+        const option = $('<option>').val(model.id).text(model.id);
+        select.append(option);
     }
 }
 
@@ -1525,14 +1322,20 @@ let lancedbBackend = null;
  * Initializes the LanceDB backend if enabled
  */
 async function initLanceDBBackend() {
-    if (!settings.useLanceDB || !lancedbBackend) {
+    if (!settings.useLanceDB) {
+        console.debug('Vectors: LanceDB backend disabled');
+        return;
+    }
+
+    if (lancedbBackend) {
+        console.debug('Vectors: LanceDB backend already initialized');
         return;
     }
 
     try {
         lancedbBackend = new LanceDBBackend({});
         lancedbBackend.init(getRequestHeaders);
-        
+
         // Test connection
         const health = await lancedbBackend.healthCheck();
         if (health.healthy) {
@@ -1545,9 +1348,22 @@ async function initLanceDBBackend() {
     }
 }
 
-// Export initialization function
+// Export for debugging
 window.initLanceDBBackend = initLanceDBBackend;
-window.lancedbBackend = lancedbBackend;
-window.lancedbBackendClass = LanceDBBackend;
-window.VectorBackend = VectorBackend;
-window.BackendFactory = BackendFactory;
+window.getLanceDBBackend = () => lancedbBackend;
+
+// Initialize extension
+jQuery(async () => {
+    // Load saved settings
+    if (extension_settings.vectors) {
+        Object.assign(settings, extension_settings.vectors);
+    }
+
+    // Initialize LanceDB backend if enabled
+    if (settings.useLanceDB) {
+        await initLanceDBBackend();
+    }
+
+    // Initialize settings UI
+    toggleSettings();
+});

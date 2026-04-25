@@ -9,7 +9,7 @@ export class VectorBackend {
     /**
      * Insert items into the vector store
      * @param {string} collectionId - Collection identifier
-     * @param {Array<{hash: string, text: string, index: number, metadata?: object}>} items - Items to insert
+     * @param {Array<{hash: number, text: string, index: number, metadata?: object}>} items - Items to insert
      * @returns {Promise<{success: boolean, inserted: number}>}
      */
     async insert(collectionId, items) {
@@ -22,7 +22,7 @@ export class VectorBackend {
      * @param {string} queryText - Text to search for
      * @param {number} topK - Number of results to return
      * @param {number} threshold - Minimum similarity threshold
-     * @returns {Promise<Array<{hash: string, text: string, index: number, score: number, metadata?: object}>>}
+     * @returns {Promise<{hashes: number[], metadata: object[]}>}
      */
     async query(collectionId, queryText, topK, threshold) {
         throw new Error('Not implemented');
@@ -31,7 +31,7 @@ export class VectorBackend {
     /**
      * Delete items by hash
      * @param {string} collectionId - Collection identifier
-     * @param {string[]} hashes - Hashes to delete
+     * @param {number[]} hashes - Hashes to delete
      * @returns {Promise<{success: boolean, deleted: number}>}
      */
     async delete(collectionId, hashes) {
@@ -41,7 +41,7 @@ export class VectorBackend {
     /**
      * List all hashes in collection
      * @param {string} collectionId - Collection identifier
-     * @returns {Promise<string[]>}
+     * @returns {Promise<number[]>}
      */
     async list(collectionId) {
         throw new Error('Not implemented');
@@ -50,8 +50,8 @@ export class VectorBackend {
     /**
      * Get items by hashes
      * @param {string} collectionId - Collection identifier
-     * @param {string[]} hashes - Hashes to retrieve
-     * @returns {Promise<Array<{hash: string, text: string, index: number, metadata?: object}>>}
+     * @param {number[]} hashes - Hashes to retrieve
+     * @returns {Promise<Array<{hash: number, text: string, index: number, metadata?: object}>>}
      */
     async getByHashes(collectionId, hashes) {
         throw new Error('Not implemented');
@@ -63,6 +63,26 @@ export class VectorBackend {
      * @returns {Promise<{success: boolean}>}
      */
     async purge(collectionId) {
+        throw new Error('Not implemented');
+    }
+
+    /**
+     * Purge all collections
+     * @returns {Promise<{success: boolean}>}
+     */
+    async purgeAll() {
+        throw new Error('Not implemented');
+    }
+
+    /**
+     * Query multiple collections at once
+     * @param {string[]} collectionIds - Collection identifiers
+     * @param {string} queryText - Text to search for
+     * @param {number} topK - Number of results per collection
+     * @param {number} threshold - Minimum similarity threshold
+     * @returns {Promise<Record<string, {hashes: number[], metadata: object[]}>>}
+     */
+    async queryMultipleCollections(collectionIds, queryText, topK, threshold) {
         throw new Error('Not implemented');
     }
 
@@ -80,28 +100,5 @@ export class VectorBackend {
      */
     getName() {
         throw new Error('Not implemented');
-    }
-}
-
-/**
- * Backend factory
- */
-export class BackendFactory {
-    static backends = new Map();
-
-    static register(name, BackendClass) {
-        BackendFactory.backends.set(name, BackendClass);
-    }
-
-    static create(name, settings) {
-        const BackendClass = BackendFactory.backends.get(name);
-        if (!BackendClass) {
-            throw new Error(`Unknown backend: ${name}`);
-        }
-        return new BackendClass(settings);
-    }
-
-    static getAvailableBackends() {
-        return Array.from(BackendFactory.backends.keys());
     }
 }
