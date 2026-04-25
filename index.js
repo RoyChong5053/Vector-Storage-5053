@@ -34,7 +34,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from "
 import { SlashCommandEnumValue, enumTypes } from "../../../slash-commands/SlashCommandEnumValue.js";
 import { commonEnumProviders } from "../../../slash-commands/SlashCommandCommonEnumsProvider.js";
 import { slashCommandReturnHelper } from "../../../slash-commands/SlashCommandReturnHelper.js";
-import { generateWebLlmChatPrompt, isWebLlmSupported } from "../shared.js";
+import { generateWebLlmChatPrompt, isWebLlmSupported } from "../../vectors/shared.js";
 import { WebLlmVectorProvider } from "./webllm.js";
 import { removeReasoningFromString } from "../../../reasoning.js";
 import { oai_settings } from "../../../openai.js";
@@ -1352,18 +1352,954 @@ async function initLanceDBBackend() {
 window.initLanceDBBackend = initLanceDBBackend;
 window.getLanceDBBackend = () => lancedbBackend;
 
+async function loadNanoGPTModels() {
+    try {
+        const response = await fetch('/api/openai/nanogpt/models/embedding', {
+            method: 'POST',
+            headers: getRequestHeaders({ omitContentType: true }),
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        /** @type {Array<any>} */
+        const data = await response.json();
+        const models = Array.isArray(data) ? data : [];
+        populateNanoGPTModelSelect(models);
+    } catch (err) {
+        console.warn('NanoGPT models fetch failed', err);
+        populateNanoGPTModelSelect([]);
+    }
+}
+
+function populateNanoGPTModelSelect(models) {
+    const select = $('#vectors_nanogpt_model');
+    select.empty();
+    for (const m of models) {
+        const option = document.createElement('option');
+        option.value = m.id;
+        option.text = m.name || m.id;
+        select.append(option);
+    }
+    if (!settings.nanogpt_model && models.length) {
+        settings.nanogpt_model = models[0].id;
+    }
+    $('#vectors_nanogpt_model').val(settings.nanogpt_model);
+}
+
+async function loadElectronHubModels() {
+    try {
+        const response = await fetch('/api/openai/electronhub/models', {
+            method: 'POST',
+            headers: getRequestHeaders({ omitContentType: true }),
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        /** @type {Array<any>} */
+        const data = await response.json();
+        // filter by embeddings endpoint
+        const models = Array.isArray(data) ? data.filter(m => Array.isArray(m?.endpoints) && m.endpoints.includes('/v1/embeddings')) : [];
+        populateElectronHubModelSelect(models);
+    } catch (err) {
+        console.warn('Electron Hub models fetch failed', err);
+        populateElectronHubModelSelect([]);
+    }
+}
+
+/**
+ * Populates the Electron Hub model select element.
+ * @param {{ id: string, name: string }[]} models Electron Hub models
+ */
+function populateElectronHubModelSelect(models) {
+    const select = $('#vectors_electronhub_model');
+    select.empty();
+    for (const m of models) {
+        const option = document.createElement('option');
+        option.value = m.id;
+        option.text = m.name || m.id;
+        select.append(option);
+    }
+    if (!settings.electronhub_model && models.length) {
+        settings.electronhub_model = models[0].id;
+    }
+    $('#vectors_electronhub_model').val(settings.electronhub_model);
+}
+
+async function loadOpenRouterModels() {
+    try {
+        const response = await fetch('/api/openrouter/models/embedding', {
+            method: 'POST',
+            headers: getRequestHeaders({ omitContentType: true }),
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        /** @type {Array<any>} */
+        const data = await response.json();
+        const models = Array.isArray(data) ? data : [];
+        populateOpenRouterModelSelect(models);
+    } catch (err) {
+        console.warn('OpenRouter models fetch failed', err);
+        populateOpenRouterModelSelect([]);
+    }
+}
+
+/**
+ * Populates the OpenRouter model select element.
+ * @param {{ id: string, name: string }[]} models OpenRouter models
+ */
+function populateOpenRouterModelSelect(models) {
+    const select = $('#vectors_openrouter_model');
+    select.empty();
+    for (const m of models) {
+        const option = document.createElement('option');
+        option.value = m.id;
+        option.text = m.name || m.id;
+        select.append(option);
+    }
+    if (!settings.openrouter_model && models.length) {
+        settings.openrouter_model = models[0].id;
+    }
+    $('#vectors_openrouter_model').val(settings.openrouter_model);
+}
+
+async function loadSiliconFlowModels() {
+    try {
+        const response = await fetch('/api/openai/siliconflow/models/embedding', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({
+                siliconflow_endpoint: oai_settings.siliconflow_endpoint,
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        /** @type {Array<any>} */
+        const data = await response.json();
+        const models = Array.isArray(data) ? data : [];
+        populateSiliconFlowModelSelect(models);
+    } catch (err) {
+        console.warn('SiliconFlow models fetch failed', err);
+        populateSiliconFlowModelSelect([]);
+    }
+}
+
+function populateSiliconFlowModelSelect(models) {
+    const select = $('#vectors_siliconflow_model');
+    select.empty();
+    for (const m of models) {
+        const option = document.createElement('option');
+        option.value = m.id;
+        option.text = m.id;
+        select.append(option);
+    }
+    if (!settings.siliconflow_model && models.length) {
+        settings.siliconflow_model = models[0].id;
+    }
+    $('#vectors_siliconflow_model').val(settings.siliconflow_model);
+}
+
+/**
+ * Executes a function with WebLLM error handling.
+ * @param {function(): Promise<T>} func Function to execute
+ * @returns {Promise<T>}
+ * @template T
+ */
+async function executeWithWebLlmErrorHandling(func) {
+    try {
+        return await func();
+    } catch (error) {
+        console.log('Vectors: Failed to load WebLLM models', error);
+        if (!(error instanceof Error)) {
+            return;
+        }
+        switch (error.cause) {
+            case 'webllm-not-available':
+                toastr.warning('WebLLM is not available. Please install the extension.', 'WebLLM not installed');
+                break;
+            case 'webllm-not-updated':
+                toastr.warning('The installed extension version does not support embeddings.', 'WebLLM update required');
+                break;
+        }
+    }
+}
+
+/**
+ * Loads and displays WebLLM models in the settings.
+ * @returns {Promise<void>}
+ */
+function loadWebLlmModels() {
+    return executeWithWebLlmErrorHandling(() => {
+        const models = webllmProvider.getModels();
+        $('#vectors_webllm_model').empty();
+        for (const model of models) {
+            $('#vectors_webllm_model').append($('<option>', { value: model.id, text: model.toString() }));
+        }
+        if (!settings.webllm_model || !models.some(x => x.id === settings.webllm_model)) {
+            if (models.length) {
+                settings.webllm_model = models[0].id;
+            }
+        }
+        $('#vectors_webllm_model').val(settings.webllm_model);
+        return Promise.resolve();
+    });
+}
+
+/**
+ * Creates WebLLM embeddings for a list of items.
+ * @param {string[]} items Items to embed
+ * @returns {Promise<Record<string, number[]>>} Calculated embeddings
+ */
+async function createWebLlmEmbeddings(items) {
+    if (items.length === 0) {
+        return /** @type {Record<string, number[]>} */ ({});
+    }
+    return executeWithWebLlmErrorHandling(async () => {
+        const embeddings = await webllmProvider.embedTexts(items, settings.webllm_model);
+        const result = /** @type {Record<string, number[]>} */ ({});
+        for (let i = 0; i < items.length; i++) {
+            result[items[i]] = embeddings[i];
+        }
+        return result;
+    });
+}
+
+/**
+ * Creates KoboldCpp embeddings for a list of items.
+ * @param {string[]} items Items to embed
+ * @returns {Promise<{embeddings: Record<string, number[]>, model: string}>} Calculated embeddings
+ */
+async function createKoboldCppEmbeddings(items) {
+    const response = await fetch('/api/backends/kobold/embed', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({
+            items: items,
+            server: settings.use_alt_endpoint ? settings.alt_endpoint_url : textgenerationwebui_settings.server_urls[textgen_types.KOBOLDCPP],
+        }),
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to get KoboldCpp embeddings');
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data.embeddings) || !data.model || data.embeddings.length !== items.length) {
+        throw new Error('Invalid response from KoboldCpp embeddings');
+    }
+
+    const embeddings = /** @type {Record<string, number[]>} */ ({});
+    for (let i = 0; i < data.embeddings.length; i++) {
+        if (!Array.isArray(data.embeddings[i]) || data.embeddings[i].length === 0) {
+            throw new Error('KoboldCpp returned an empty embedding. Reduce the chunk size and/or size threshold and try again.');
+        }
+
+        embeddings[items[i]] = data.embeddings[i];
+    }
+
+    return {
+        embeddings: embeddings,
+        model: data.model,
+    };
+}
+
+async function onPurgeClick() {
+    const chatId = getCurrentChatId();
+    if (!chatId) {
+        toastr.info('No chat selected', 'Purge aborted');
+        return;
+    }
+    if (await purgeVectorIndex(chatId)) {
+        toastr.success('Vector index purged', 'Purge successful');
+    } else {
+        toastr.error('Failed to purge vector index', 'Purge failed');
+    }
+}
+
+async function onViewStatsClick() {
+    const chatId = getCurrentChatId();
+    if (!chatId) {
+        toastr.info('No chat selected');
+        return;
+    }
+
+    const hashesInCollection = await getSavedHashes(chatId);
+    const totalHashes = hashesInCollection.length;
+    const uniqueHashes = hashesInCollection.filter(onlyUnique).length;
+
+    toastr.info(`Total hashes: <b>${totalHashes}</b><br>
+    Unique hashes: <b>${uniqueHashes}</b><br><br>
+    I'll mark collected messages with a green circle.`,
+    `Stats for chat ${escapeHtml(chatId)}`,
+    { timeOut: 10000, escapeHtml: false },
+    );
+
+    const chat = getContext().chat;
+    for (const message of chat) {
+        if (hashesInCollection.includes(getStringHash(substituteParams(message.mes)))) {
+            const messageElement = $(`.mes[mesid="${chat.indexOf(message)}"]`);
+            messageElement.addClass('vectorized');
+        }
+    }
+}
+
+async function onVectorizeAllFilesClick() {
+    try {
+        const dataBank = getDataBankAttachments();
+        const chatAttachments = getContext().chat.filter(x => Array.isArray(x.extra?.files)).map(x => x.extra.files).flat();
+        const allFiles = [...dataBank, ...chatAttachments];
+
+        /**
+         * Gets the chunk size for a file attachment.
+         * @param file {import('../../chats.js').FileAttachment} File attachment
+         * @returns {number} Chunk size for the file
+         */
+        function getChunkSize(file) {
+            if (chatAttachments.includes(file)) {
+                // Convert kilobytes to string length
+                const thresholdLength = settings.size_threshold * 1024;
+                return file.size > thresholdLength ? settings.chunk_size : -1;
+            }
+
+            if (dataBank.includes(file)) {
+                // Convert kilobytes to string length
+                const thresholdLength = settings.size_threshold_db * 1024;
+                // Use chunk size from settings if file is larger than threshold
+                return file.size > thresholdLength ? settings.chunk_size_db : -1;
+            }
+
+            return -1;
+        }
+
+        /**
+         * Gets the overlap percent for a file attachment.
+         * @param file {import('../../chats.js').FileAttachment} File attachment
+         * @returns {number} Overlap percent for the file
+         */
+        function getOverlapPercent(file) {
+            if (chatAttachments.includes(file)) {
+                return settings.overlap_percent;
+            }
+
+            if (dataBank.includes(file)) {
+                return settings.overlap_percent_db;
+            }
+
+            return 0;
+        }
+
+        let allSuccess = true;
+
+        for (const file of allFiles) {
+            const text = await getFileAttachment(file.url);
+            const collectionId = getFileCollectionId(file.url);
+            const hashes = await getSavedHashes(collectionId);
+
+            if (hashes.length) {
+                console.log(`Vectors: File ${file.name} is already vectorized`);
+                continue;
+            }
+
+            const chunkSize = getChunkSize(file);
+            const overlapPercent = getOverlapPercent(file);
+            const result = await vectorizeFile(text, file.name, collectionId, chunkSize, overlapPercent);
+
+            if (!result) {
+                allSuccess = false;
+            }
+        }
+
+        if (allSuccess) {
+            toastr.success('All files vectorized', 'Vectorization successful');
+        } else {
+            toastr.warning('Some files failed to vectorize. Check browser console for more details.', 'Vector Storage');
+        }
+    } catch (error) {
+        console.error('Vectors: Failed to vectorize all files', error);
+        toastr.error('Failed to vectorize all files', 'Vectorization failed');
+    }
+}
+
+async function onPurgeFilesClick() {
+    try {
+        const dataBank = getDataBankAttachments();
+        const chatAttachments = getContext().chat.filter(x => Array.isArray(x.extra?.files)).map(x => x.extra.files).flat();
+        const allFiles = [...dataBank, ...chatAttachments];
+
+        for (const file of allFiles) {
+            await purgeFileVectorIndex(file.url);
+        }
+
+        toastr.success('All files purged', 'Purge successful');
+    } catch (error) {
+        console.error('Vectors: Failed to purge all files', error);
+        toastr.error('Failed to purge all files', 'Purge failed');
+    }
+}
+
+async function activateWorldInfo(chat) {
+    if (!settings.enabled_world_info) {
+        console.debug('Vectors: Disabled for World Info');
+        return;
+    }
+
+    const entries = await getSortedEntries();
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+        console.debug('Vectors: No WI entries found');
+        return;
+    }
+
+    // Group entries by "world" field
+    const groupedEntries = {};
+
+    for (const entry of entries) {
+        // Skip orphaned entries. Is it even possible?
+        if (!entry.world) {
+            console.debug('Vectors: Skipped orphaned WI entry', entry);
+            continue;
+        }
+
+        // Skip disabled entries
+        if (entry.disable) {
+            console.debug('Vectors: Skipped disabled WI entry', entry);
+            continue;
+        }
+
+        // Skip entries without content
+        if (!entry.content) {
+            console.debug('Vectors: Skipped WI entry without content', entry);
+            continue;
+        }
+
+        // Skip non-vectorized entries
+        if (!entry.vectorized && !settings.enabled_for_all) {
+            console.debug('Vectors: Skipped non-vectorized WI entry', entry);
+            continue;
+        }
+
+        if (!Object.hasOwn(groupedEntries, entry.world)) {
+            groupedEntries[entry.world] = [];
+        }
+
+        groupedEntries[entry.world].push(entry);
+    }
+
+    const collectionIds = [];
+
+    if (Object.keys(groupedEntries).length === 0) {
+        console.debug('Vectors: No WI entries to synchronize');
+        return;
+    }
+
+    // Synchronize collections
+    for (const world in groupedEntries) {
+        const collectionId = `world_${getStringHash(world)}`;
+        const hashesInCollection = await getSavedHashes(collectionId);
+        const newEntries = groupedEntries[world].filter(x => !hashesInCollection.includes(getStringHash(x.content)));
+        const deletedHashes = hashesInCollection.filter(x => !groupedEntries[world].some(y => getStringHash(y.content) === x));
+
+        if (newEntries.length > 0) {
+            console.log(`Vectors: Found ${newEntries.length} new WI entries for world ${world}`);
+            await insertVectorItems(collectionId, newEntries.map(x => ({ hash: getStringHash(x.content), text: x.content, index: x.uid })));
+        }
+
+        if (deletedHashes.length > 0) {
+            console.log(`Vectors: Deleted ${deletedHashes.length} old hashes for world ${world}`);
+            await deleteVectorItems(collectionId, deletedHashes);
+        }
+
+        collectionIds.push(collectionId);
+    }
+
+    // Perform a multi-query
+    const queryText = await getQueryText(chat, 'world-info');
+
+    if (queryText.length === 0) {
+        console.debug('Vectors: No text to query for WI');
+        return;
+    }
+
+    const queryResults = await queryMultipleCollections(collectionIds, queryText, settings.max_entries, settings.score_threshold);
+    const activatedHashes = Object.values(queryResults).flatMap(x => x.hashes).filter(onlyUnique);
+    const activatedEntries = [];
+
+    // Activate entries found in the query results
+    for (const entry of entries) {
+        const hash = getStringHash(entry.content);
+
+        if (activatedHashes.includes(hash)) {
+            activatedEntries.push(entry);
+        }
+    }
+
+    if (activatedEntries.length === 0) {
+        console.debug('Vectors: No activated WI entries found');
+        return;
+    }
+
+    // Mark activated entries
+    for (const entry of activatedEntries) {
+        entry.force_activation = true;
+    }
+
+    console.log(`Vectors: Activated ${activatedEntries.length} WI entries`);
+}
+
 // Initialize extension
 jQuery(async () => {
-    // Load saved settings
-    if (extension_settings.vectors) {
-        Object.assign(settings, extension_settings.vectors);
+    if (!extension_settings.vectors) {
+        extension_settings.vectors = settings;
     }
+
+    // Migrate from old settings
+    if (settings.enabled) {
+        settings.enabled_chats = true;
+    }
+
+    Object.assign(settings, extension_settings.vectors);
+
+    // Migrate from TensorFlow to Transformers
+    settings.source = settings.source !== 'local' ? settings.source : 'transformers';
+
+    // Load settings UI template
+    const template = await renderExtensionTemplateAsync(MODULE_NAME, 'settings');
+    $('#vectors_container').append(template);
+
+    // LanceDB toggle
+    $('#vectors_use_lancedb').prop('checked', settings.useLanceDB).on('input', () => {
+        settings.useLanceDB = $('#vectors_use_lancedb').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+        if (settings.useLanceDB) {
+            initLanceDBBackend();
+        }
+    });
+
+    // Chat vectorization toggle
+    $('#vectors_enabled_chats').prop('checked', settings.enabled_chats).on('input', () => {
+        settings.enabled_chats = $('#vectors_enabled_chats').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+        toggleSettings();
+    });
+
+    // File vectorization toggle
+    $('#vectors_enabled_files').prop('checked', settings.enabled_files).on('input', () => {
+        settings.enabled_files = $('#vectors_enabled_files').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+        toggleSettings();
+    });
+
+    // Vectorization source
+    $('#vectors_source').val(settings.source).on('change', () => {
+        settings.source = String($('#vectors_source').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+        toggleSettings();
+    });
+
+    // Alternative endpoint
+    $('#vector_altEndpointUrl_enabled').prop('checked', settings.use_alt_endpoint).on('input', () => {
+        settings.use_alt_endpoint = $('#vector_altEndpointUrl_enabled').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vector_altEndpoint_address').val(settings.alt_endpoint_url).on('change', () => {
+        settings.alt_endpoint_url = String($('#vector_altEndpoint_address').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+
+    // Model selectors
+    $('#vectors_togetherai_model').val(settings.togetherai_model).on('change', () => {
+        settings.togetherai_model = String($('#vectors_togetherai_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_openai_model').val(settings.openai_model).on('change', () => {
+        settings.openai_model = String($('#vectors_openai_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_electronhub_model').val(settings.electronhub_model).on('change', () => {
+        settings.electronhub_model = String($('#vectors_electronhub_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_chutes_model').val(settings.chutes_model).on('change', () => {
+        settings.chutes_model = String($('#vectors_chutes_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_nanogpt_model').val(settings.nanogpt_model).on('change', () => {
+        settings.nanogpt_model = String($('#vectors_nanogpt_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_siliconflow_model').val(settings.siliconflow_model).on('change', () => {
+        settings.siliconflow_model = String($('#vectors_siliconflow_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_openrouter_model').val(settings.openrouter_model).on('change', () => {
+        settings.openrouter_model = String($('#vectors_openrouter_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_cohere_model').val(settings.cohere_model).on('change', () => {
+        settings.cohere_model = String($('#vectors_cohere_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_ollama_model').val(settings.ollama_model).on('input', () => {
+        settings.ollama_model = String($('#vectors_ollama_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_vllm_model').val(settings.vllm_model).on('input', () => {
+        settings.vllm_model = String($('#vectors_vllm_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_ollama_keep').prop('checked', settings.ollama_keep).on('input', () => {
+        settings.ollama_keep = $('#vectors_ollama_keep').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+
+    // Chat settings
+    $('#vectors_template').val(settings.template).on('input', () => {
+        settings.template = String($('#vectors_template').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_depth').val(settings.depth).on('input', () => {
+        settings.depth = Number($('#vectors_depth').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_protect').val(settings.protect).on('input', () => {
+        settings.protect = Number($('#vectors_protect').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_insert').val(settings.insert).on('input', () => {
+        settings.insert = Number($('#vectors_insert').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_query').val(settings.query).on('input', () => {
+        settings.query = Number($('#vectors_query').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $(`input[name="vectors_position"][value="${settings.position}"]`).prop('checked', true);
+    $('input[name="vectors_position"]').on('change', () => {
+        settings.position = Number($('input[name="vectors_position"]:checked').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+
+    // Action buttons
+    $('#vectors_vectorize_all').on('click', onVectorizeAllClick);
+    $('#vectors_purge').on('click', onPurgeClick);
+    $('#vectors_view_stats').on('click', onViewStatsClick);
+    $('#vectors_files_vectorize_all').on('click', onVectorizeAllFilesClick);
+    $('#vectors_files_purge').on('click', onPurgeFilesClick);
+
+    // File settings
+    $('#vectors_size_threshold').val(settings.size_threshold).on('input', () => {
+        settings.size_threshold = Number($('#vectors_size_threshold').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_chunk_size').val(settings.chunk_size).on('input', () => {
+        settings.chunk_size = Number($('#vectors_chunk_size').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_chunk_count').val(settings.chunk_count).on('input', () => {
+        settings.chunk_count = Number($('#vectors_chunk_count').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_include_wi').prop('checked', settings.include_wi).on('input', () => {
+        settings.include_wi = !!$('#vectors_include_wi').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_summarize').prop('checked', settings.summarize).on('input', () => {
+        settings.summarize = !!$('#vectors_summarize').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_summarize_user').prop('checked', settings.summarize_sent).on('input', () => {
+        settings.summarize_sent = !!$('#vectors_summarize_user').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_summary_source').val(settings.summary_source).on('change', () => {
+        settings.summary_source = String($('#vectors_summary_source').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_summary_prompt').val(settings.summary_prompt).on('input', () => {
+        settings.summary_prompt = String($('#vectors_summary_prompt').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_message_chunk_size').val(settings.message_chunk_size).on('input', () => {
+        settings.message_chunk_size = Number($('#vectors_message_chunk_size').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+
+    // Data Bank file settings
+    $('#vectors_size_threshold_db').val(settings.size_threshold_db).on('input', () => {
+        settings.size_threshold_db = Number($('#vectors_size_threshold_db').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_chunk_size_db').val(settings.chunk_size_db).on('input', () => {
+        settings.chunk_size_db = Number($('#vectors_chunk_size_db').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_chunk_count_db').val(settings.chunk_count_db).on('input', () => {
+        settings.chunk_count_db = Number($('#vectors_chunk_count_db').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_overlap_percent').val(settings.overlap_percent).on('input', () => {
+        settings.overlap_percent = Number($('#vectors_overlap_percent').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_overlap_percent_db').val(settings.overlap_percent_db).on('input', () => {
+        settings.overlap_percent_db = Number($('#vectors_overlap_percent_db').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_file_template_db').val(settings.file_template_db).on('input', () => {
+        settings.file_template_db = String($('#vectors_file_template_db').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $(`input[name="vectors_file_position_db"][value="${settings.file_position_db}"]`).prop('checked', true);
+    $('input[name="vectors_file_position_db"]').on('change', () => {
+        settings.file_position_db = Number($('input[name="vectors_file_position_db"]:checked').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_file_depth_db').val(settings.file_depth_db).on('input', () => {
+        settings.file_depth_db = Number($('#vectors_file_depth_db').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_file_depth_role_db').val(settings.file_depth_role_db).on('input', () => {
+        settings.file_depth_role_db = Number($('#vectors_file_depth_role_db').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_translate_files').prop('checked', settings.translate_files).on('input', () => {
+        settings.translate_files = !!$('#vectors_translate_files').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+
+    // World Info settings
+    $('#vectors_enabled_world_info').prop('checked', settings.enabled_world_info).on('input', () => {
+        settings.enabled_world_info = !!$('#vectors_enabled_world_info').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+        toggleSettings();
+    });
+    $('#vectors_enabled_for_all').prop('checked', settings.enabled_for_all).on('input', () => {
+        settings.enabled_for_all = !!$('#vectors_enabled_for_all').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_max_entries').val(settings.max_entries).on('input', () => {
+        settings.max_entries = Number($('#vectors_max_entries').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+
+    // Score threshold and chunk delimiter
+    $('#vectors_score_threshold').val(settings.score_threshold).on('input', () => {
+        settings.score_threshold = Number($('#vectors_score_threshold').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_force_chunk_delimiter').val(settings.force_chunk_delimiter).on('input', () => {
+        settings.force_chunk_delimiter = String($('#vectors_force_chunk_delimiter').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_only_custom_boundary').prop('checked', settings.only_custom_boundary).on('input', () => {
+        settings.only_custom_boundary = !!$('#vectors_only_custom_boundary').prop('checked');
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+
+    // Ollama pull link
+    $('#vectors_ollama_pull').on('click', (e) => {
+        const presetModel = extension_settings.vectors.ollama_model || '';
+        e.preventDefault();
+        $('#ollama_download_model').trigger('click');
+        $('#dialogue_popup_input').val(presetModel);
+    });
+
+    // WebLLM links
+    $('#vectors_webllm_install').on('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (Object.hasOwn(SillyTavern, 'llm')) {
+            toastr.info('WebLLM is already installed');
+            return;
+        }
+
+        openThirdPartyExtensionMenu('https://github.com/SillyTavern/Extension-WebLLM');
+    });
+    $('#vectors_webllm_model').on('input', () => {
+        settings.webllm_model = String($('#vectors_webllm_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+    $('#vectors_webllm_load').on('click', async () => {
+        if (!settings.webllm_model) return;
+        await webllmProvider.loadModel(settings.webllm_model);
+        toastr.success('WebLLM model loaded');
+    });
+
+    // Google model
+    $('#vectors_google_model').val(settings.google_model).on('input', () => {
+        settings.google_model = String($('#vectors_google_model').val());
+        Object.assign(extension_settings.vectors, settings);
+        saveSettingsDebounced();
+    });
+
+    // NomicAI API key indicator
+    $('#api_key_nomicai').toggleClass('success', !!secret_state[SECRET_KEYS.NOMICAI]);
+    [event_types.SECRET_WRITTEN, event_types.SECRET_DELETED, event_types.SECRET_ROTATED].forEach(event => {
+        eventSource.on(event, (/** @type {string} */ key) => {
+            if (key !== SECRET_KEYS.NOMICAI) return;
+            $('#api_key_nomicai').toggleClass('success', !!secret_state[SECRET_KEYS.NOMICAI]);
+        });
+    });
 
     // Initialize LanceDB backend if enabled
     if (settings.useLanceDB) {
         await initLanceDBBackend();
     }
 
-    // Initialize settings UI
+    // Initialize settings UI visibility
     toggleSettings();
+
+    // Event listeners for chat changes
+    eventSource.on(event_types.MESSAGE_DELETED, onChatEvent);
+    eventSource.on(event_types.MESSAGE_EDITED, onChatEvent);
+    eventSource.on(event_types.MESSAGE_SENT, onChatEvent);
+    eventSource.on(event_types.MESSAGE_RECEIVED, onChatEvent);
+    eventSource.on(event_types.MESSAGE_SWIPED, onChatEvent);
+    eventSource.on(event_types.CHAT_DELETED, purgeVectorIndex);
+    eventSource.on(event_types.GROUP_CHAT_DELETED, purgeVectorIndex);
+    eventSource.on(event_types.FILE_ATTACHMENT_DELETED, purgeFileVectorIndex);
+    eventSource.on(event_types.EXTENSION_SETTINGS_LOADED, async (manifest) => {
+        if (settings.source === 'webllm' && manifest?.display_name === 'WebLLM') {
+            await loadWebLlmModels();
+        }
+    });
+
+    // Register slash commands
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'vector-state',
+        helpString: 'Set whether chat vectorization is enabled or return the current boolean if no argument is provided',
+        returns: 'boolean for if chat vectorization is enabled',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'boolean to set whether chat vectorization is enabled',
+                typeList: [ARGUMENT_TYPE.BOOLEAN],
+                enumList: commonEnumProviders.boolean('trueFalse')(),
+            }),
+        ],
+        callback: async (_args, value) => {
+            const raw = String(value ?? '').trim();
+            if (!raw) {
+                return String(settings.enabled_chats);
+            }
+
+            const parsed = isTrueBoolean(raw);
+            $('#vectors_enabled_chats')
+                .prop('checked', parsed)
+                .trigger('input');
+
+            return String(settings.enabled_chats);
+        },
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'vector-files-state',
+        helpString: 'Set whether file vectorization is enabled or return the current boolean if no argument is provided',
+        returns: 'boolean for if file vectorization is enabled',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'boolean to set whether file vectorization is enabled',
+                typeList: [ARGUMENT_TYPE.BOOLEAN],
+                enumList: commonEnumProviders.boolean('trueFalse')(),
+            }),
+        ],
+        callback: async (_args, value) => {
+            const raw = String(value ?? '').trim();
+            if (!raw) {
+                return String(settings.enabled_files);
+            }
+
+            const parsed = isTrueBoolean(raw);
+            $('#vectors_enabled_files')
+                .prop('checked', parsed)
+                .trigger('input');
+
+            return String(settings.enabled_files);
+        },
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'vector-worldinfo-state',
+        helpString: 'Set whether world info vectorization is enabled or return the current boolean if no argument is provided',
+        returns: 'boolean for if world info vectorization is enabled',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'boolean to set whether world info vectorization is enabled',
+                typeList: [ARGUMENT_TYPE.BOOLEAN],
+                enumList: commonEnumProviders.boolean('trueFalse')(),
+            }),
+        ],
+        callback: async (_args, value) => {
+            const raw = String(value ?? '').trim();
+            if (!raw) {
+                return String(settings.enabled_world_info);
+            }
+
+            const parsed = isTrueBoolean(raw);
+            $('#vectors_enabled_world_info')
+                .prop('checked', parsed)
+                .trigger('input');
+
+            return String(settings.enabled_world_info);
+        },
+    }));
+
+    registerDebugFunction('purge-everything', 'Purge all vector indices', 'Obliterate all stored vectors for all sources. No mercy.', async () => {
+        if (!confirm('Are you sure?')) {
+            return;
+        }
+        await purgeAllVectorIndexes();
+    });
 });
