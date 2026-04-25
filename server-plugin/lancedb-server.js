@@ -3,11 +3,7 @@
  * Handles vector storage with LanceDB + embedding
  */
 
-import { Embeddings, OllamaEmbeddings } from '@langchain/community/vectorstores/lancedb';
-import { LanceDB } from '@langchain/community/vectorstores/lancedb';
-import { LanceDB as LanceDBClient, Table } from '@langchain/community/vectorstores/lancedb';
-import { createLanceDBDatabase } from '@langchain/community/utils/lancedb';
-import { getRuntimeSettings } from '../../../framework/runtime.js';
+import lancedb from '@lancedb/lancedb';
 
 /**
  * @typedef {Object} VectorItem
@@ -36,22 +32,20 @@ export async function lanceDB() {
         return lancedbConnection;
     }
 
-    const { getRunningServerPort } = getRuntimeSettings();
     const dbPath = process.env.LANCEDB_PATH || './data/vectors.lancedb';
 
     try {
-        // Create directory if it doesn't exist
         const fs = await import('fs');
         const path = await import('path');
         const dir = path.dirname(dbPath);
-        if (!fs.existsSync(dir)) {
+        if (dir && !fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
 
-        lancedbClient = await createLanceDBDatabase(dbPath);
+        lancedbClient = await lancedb.connect(dbPath);
         lancedbConnection = {
             client: lancedbClient,
-            db: lancedbClient.db,
+            db: lancedbClient,
         };
 
         console.log('[LanceDB] Connected to database at', dbPath);
@@ -83,7 +77,7 @@ export class VectorStorage {
     /**
      * Get or create a table for a collection
      * @param {string} collectionId
-     * @returns {Promise<Table>}
+     * @returns {Promise<any>}
      */
     async getTable(collectionId) {
         const tableName = this.sanitizeTableName(collectionId);

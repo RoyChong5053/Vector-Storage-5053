@@ -11,7 +11,7 @@ import {
     substituteParams,
     generateRaw,
     substituteParamsExtended,
-} from '../../../script.js';
+} from '../../../../public/script.js';
 import {
     ModuleWorkerWrapper,
     extension_settings,
@@ -20,24 +20,24 @@ import {
     renderExtensionTemplateAsync,
     doExtrasFetch, getApiUrl,
     openThirdPartyExtensionMenu,
-} from '../../extensions.js';
-import { collapseNewlines, registerDebugFunction } from '../../power-user.js';
-import { SECRET_KEYS, secret_state } from '../../secrets.js';
-import { getDataBankAttachments, getDataBankAttachmentsForSource, getFileAttachment } from '../../chats.js';
-import { debounce, getStringHash as calculateHash, waitUntilCondition, onlyUnique, splitRecursive, trimToStartSentence, trimToEndSentence, escapeHtml, isTrueBoolean } from '../../utils.js';
-import { debounce_timeout } from '../../constants.js';
-import { getSortedEntries } from '../../world-info.js';
-import { textgen_types, textgenerationwebui_settings } from '../../textgen-settings.js';
-import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
-import { SlashCommand } from '../../slash-commands/SlashCommand.js';
-import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
-import { SlashCommandEnumValue, enumTypes } from '../../slash-commands/SlashCommandEnumValue.js';
-import { commonEnumProviders } from '../../slash-commands/SlashCommandCommonEnumsProvider.js';
-import { slashCommandReturnHelper } from '../../slash-commands/SlashCommandReturnHelper.js';
+} from '../../../extensions.js';
+import { collapseNewlines, registerDebugFunction } from '../../../power-user.js';
+import { SECRET_KEYS, secret_state } from '../../../secrets.js';
+import { getDataBankAttachments, getDataBankAttachmentsForSource, getFileAttachment } from '../../../chats.js';
+import { debounce, getStringHash as calculateHash, waitUntilCondition, onlyUnique, splitRecursive, trimToStartSentence, trimToEndSentence, escapeHtml, isTrueBoolean } from '../../../utils.js';
+import { debounce_timeout } from '../../../constants.js';
+import { getSortedEntries } from '../../../world-info.js';
+import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
+import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
+import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../../slash-commands/SlashCommandArgument.js';
+import { SlashCommandEnumValue, enumTypes } from '../../../slash-commands/SlashCommandEnumValue.js';
+import { commonEnumProviders } from '../../../slash-commands/SlashCommandCommonEnumsProvider.js';
+import { slashCommandReturnHelper } from '../../../slash-commands/SlashCommandReturnHelper.js';
 import { generateWebLlmChatPrompt, isWebLlmSupported } from '../shared.js';
 import { WebLlmVectorProvider } from './webllm.js';
-import { removeReasoningFromString } from '../../reasoning.js';
-import { oai_settings } from '../../openai.js';
+import { removeReasoningFromString } from '../../../reasoning.js';
+import { oai_settings } from '../../../openai.js';
 import { LanceDBBackend } from './backends/lancedb-backend.js';
 
 /**
