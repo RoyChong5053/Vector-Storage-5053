@@ -1,0 +1,15 @@
+{
+    "display_name": "Vector Storage - LanceDB",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [
+        "embeddings"
+    ],
+    "generate_interceptor": "vectors_rearrangeChat",
+    "js": "index.js",
+    "css": "style.css",
+    "author": "YourName",
+    "version": "1.0.0",
+    "homePage": "https://github.com/YourName/Vector-Storage-LanceDB",
+    "description": "Vector Storage with built-in LanceDB support - No server plugin needed!"
+}

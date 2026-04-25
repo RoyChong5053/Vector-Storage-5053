@@ -1,0 +1,21 @@
+{
+  "name": "vectors-lancedb",
+  "version": "1.0.0",
+  "description": "Vector Storage with built-in LanceDB support",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "vector",
+    "storage",
+    "lancedb",
+    "rag",
+    "sillytavern"
+  ],
+  "author": "YourName",
+  "license": "MIT",
+  "dependencies": {
+    "@lancedb/lancedb": "^0.11.0"
+  }
+}
