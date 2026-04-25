@@ -11,33 +11,33 @@ import {
     substituteParams,
     generateRaw,
     substituteParamsExtended,
-} from "../../../../script.js";
+} from '../../../script.js';
 import {
     ModuleWorkerWrapper,
     extension_settings,
     getContext,
     modules,
+    renderExtensionTemplateAsync,
     doExtrasFetch, getApiUrl,
     openThirdPartyExtensionMenu,
-} from "../../../extensions.js";
-import { collapseNewlines, registerDebugFunction } from "../../../power-user.js";
-import { SECRET_KEYS, secret_state } from "../../../secrets.js";
-import { getDataBankAttachments, getDataBankAttachmentsForSource, getFileAttachment } from "../../../chats.js";
-import { debounce, getStringHash as calculateHash, waitUntilCondition, onlyUnique, splitRecursive, trimToStartSentence, trimToEndSentence, escapeHtml, isTrueBoolean } from "../../../utils.js";
-import { debounce_timeout } from "../../../constants.js";
-import { getSortedEntries } from "../../../world-info.js";
-import { textgen_types, textgenerationwebui_settings } from "../../../textgen-settings.js";
-import { SlashCommandParser } from "../../../slash-commands/SlashCommandParser.js";
-import { SlashCommand } from "../../../slash-commands/SlashCommand.js";
-import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from "../../../slash-commands/SlashCommandArgument.js";
-import { SlashCommandEnumValue, enumTypes } from "../../../slash-commands/SlashCommandEnumValue.js";
-import { commonEnumProviders } from "../../../slash-commands/SlashCommandCommonEnumsProvider.js";
-import { slashCommandReturnHelper } from "../../../slash-commands/SlashCommandReturnHelper.js";
-import { generateWebLlmChatPrompt, isWebLlmSupported } from "../../vectors/shared.js";
-import { WebLlmVectorProvider } from "./webllm.js";
-import { removeReasoningFromString } from "../../../reasoning.js";
-import { oai_settings } from "../../../openai.js";
-import { LanceDBBackend } from "./backends/lancedb-backend.js";
+} from '../../extensions.js';
+import { collapseNewlines, registerDebugFunction } from '../../power-user.js';
+import { SECRET_KEYS, secret_state } from '../../secrets.js';
+import { getDataBankAttachments, getDataBankAttachmentsForSource, getFileAttachment } from '../../chats.js';
+import { debounce, getStringHash as calculateHash, waitUntilCondition, onlyUnique, splitRecursive, trimToStartSentence, trimToEndSentence, escapeHtml, isTrueBoolean } from '../../utils.js';
+import { debounce_timeout } from '../../constants.js';
+import { getSortedEntries } from '../../world-info.js';
+import { textgen_types, textgenerationwebui_settings } from '../../textgen-settings.js';
+import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
+import { SlashCommand } from '../../slash-commands/SlashCommand.js';
+import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
+import { SlashCommandEnumValue, enumTypes } from '../../slash-commands/SlashCommandEnumValue.js';
+import { commonEnumProviders } from '../../slash-commands/SlashCommandCommonEnumsProvider.js';
+import { slashCommandReturnHelper } from '../../slash-commands/SlashCommandReturnHelper.js';
+import { generateWebLlmChatPrompt, isWebLlmSupported } from '../shared.js';
+import { WebLlmVectorProvider } from './webllm.js';
+import { removeReasoningFromString } from '../../reasoning.js';
+import { oai_settings } from '../../openai.js';
 
 /**
  * @typedef {object} HashedMessage
@@ -60,7 +60,6 @@ const settings = {
     alt_endpoint_url: '',
     use_alt_endpoint: false,
     include_wi: false,
-    useLanceDB: false,  // Enable LanceDB backend
     togetherai_model: 'togethercomputer/m2-bert-80M-32k-retrieval',
     openai_model: 'text-embedding-ada-002',
     electronhub_model: 'text-embedding-3-small',
@@ -749,7 +748,7 @@ function overlapChunks(chunk, index, chunks, overlapSize) {
     return overlappedChunk;
 }
 
-globalThis.vectors_rearrangeChat = rearrangeChat;
+globalThis.vectors_rearrangeChat_thirdparty = rearrangeChat;
 
 const onChatEvent = debounce(async () => await moduleWorker.update(), debounce_timeout.relaxed);
 
@@ -872,24 +871,10 @@ async function getAdditionalArgs(items) {
 
 /**
  * Gets the saved hashes for a collection
- * @param {string} collectionId
- * @returns {Promise<number[]>} Saved hashes
- */
+* @param {string} collectionId
+* @returns {Promise<number[]>} Saved hashes
+*/
 async function getSavedHashes(collectionId) {
-    // Try LanceDB backend first if enabled
-    if (settings.useLanceDB) {
-        try {
-            const hashes = await lancedbBackend.list(collectionId);
-            if (hashes.length > 0 || hashes.length === 0) {
-                console.debug('Vectors: Using LanceDB backend for list');
-                return hashes;
-            }
-        } catch (error) {
-            console.warn('Vectors: LanceDB list failed, falling back to API', error);
-        }
-    }
-
-    // Fallback to official API
     const args = await getAdditionalArgs([]);
     const response = await fetch('/api/vector/list', {
         method: 'POST',
@@ -905,7 +890,8 @@ async function getSavedHashes(collectionId) {
         throw new Error(`Failed to get saved hashes for collection ${collectionId}`);
     }
 
-    return await response.json();
+    const hashes = await response.json();
+    return hashes;
 }
 
 /**
@@ -915,18 +901,6 @@ async function getSavedHashes(collectionId) {
  * @returns {Promise<void>}
  */
 async function insertVectorItems(collectionId, items) {
-    // Try LanceDB backend first if enabled
-    if (settings.useLanceDB) {
-        try {
-            await lancedbBackend.insert(collectionId, items);
-            console.debug('Vectors: Using LanceDB backend for insert');
-            return;
-        } catch (error) {
-            console.warn('Vectors: LanceDB insert failed, falling back to API', error);
-        }
-    }
-
-    // Fallback to official API
     throwIfSourceInvalid();
 
     const args = await getAdditionalArgs(items.map(x => x.text));
@@ -998,18 +972,6 @@ function throwIfSourceInvalid() {
  * @returns {Promise<void>}
  */
 async function deleteVectorItems(collectionId, hashes) {
-    // Try LanceDB backend first if enabled
-    if (settings.useLanceDB) {
-        try {
-            await lancedbBackend.delete(collectionId, hashes);
-            console.debug('Vectors: Using LanceDB backend for delete');
-            return;
-        } catch (error) {
-            console.warn('Vectors: LanceDB delete failed, falling back to API', error);
-        }
-    }
-
-    // Fallback to official API
     const response = await fetch('/api/vector/delete', {
         method: 'POST',
         headers: getRequestHeaders(),
@@ -1033,20 +995,6 @@ async function deleteVectorItems(collectionId, hashes) {
  * @returns {Promise<{ hashes: number[], metadata: object[]}>} - Hashes of the results
  */
 async function queryCollection(collectionId, searchText, topK) {
-    // Try LanceDB backend first if enabled
-    if (settings.useLanceDB) {
-        try {
-            const results = await lancedbBackend.query(collectionId, searchText, topK, settings.score_threshold);
-            if (results) {
-                console.debug('Vectors: Using LanceDB backend for query');
-                return results;
-            }
-        } catch (error) {
-            console.warn('Vectors: LanceDB query failed, falling back to API', error);
-        }
-    }
-
-    // Fallback to official API
     const args = await getAdditionalArgs([searchText]);
     const response = await fetch('/api/vector/query', {
         method: 'POST',
@@ -1070,27 +1018,13 @@ async function queryCollection(collectionId, searchText, topK) {
 
 /**
  * Queries multiple collections for a given text.
- * @param {string[]} collectionIds - The collection IDs to query
- * @param {string} searchText - The text to query
- * @param {number} topK - The number of results to return
- * @param {number} threshold - The threshold to use
+ * @param {string[]} collectionIds - Collection IDs to query
+ * @param {string} searchText - Text to query
+ * @param {number} topK - Number of results to return
+ * @param {number} threshold - Score threshold
  * @returns {Promise<Record<string, { hashes: number[], metadata: object[] }>>} - Results mapped to collection IDs
  */
 async function queryMultipleCollections(collectionIds, searchText, topK, threshold) {
-    // Try LanceDB backend first if enabled
-    if (settings.useLanceDB) {
-        try {
-            const results = await lancedbBackend.queryMultipleCollections(collectionIds, searchText, topK, threshold);
-            if (results && Object.keys(results).length > 0) {
-                console.debug('Vectors: Using LanceDB backend for queryMultiple');
-                return results;
-            }
-        } catch (error) {
-            console.warn('Vectors: LanceDB queryMulti failed, falling back to API', error);
-        }
-    }
-
-    // Fallback to official API
     const args = await getAdditionalArgs([searchText]);
     const response = await fetch('/api/vector/query-multi', {
         method: 'POST',
@@ -1101,7 +1035,7 @@ async function queryMultipleCollections(collectionIds, searchText, topK, thresho
             searchText: searchText,
             topK: topK,
             source: settings.source,
-            threshold: threshold || settings.score_threshold,
+            threshold: threshold ?? settings.score_threshold,
         }),
     });
 
@@ -1125,18 +1059,6 @@ async function purgeFileVectorIndex(fileUrl) {
         console.log(`Vectors: Purging file vector index for ${fileUrl}`);
         const collectionId = getFileCollectionId(fileUrl);
 
-        // Try LanceDB backend first if enabled
-        if (settings.useLanceDB) {
-            try {
-                await lancedbBackend.purge(collectionId);
-                console.debug('Vectors: Using LanceDB backend for purgeFile');
-                return;
-            } catch (error) {
-                console.warn('Vectors: LanceDB purge failed, falling back to API', error);
-            }
-        }
-
-        // Fallback to official API
         const response = await fetch('/api/vector/purge', {
             method: 'POST',
             headers: getRequestHeaders(),
@@ -1159,7 +1081,7 @@ async function purgeFileVectorIndex(fileUrl) {
 /**
  * Purges the vector index for a collection.
  * @param {string} collectionId Collection ID to purge
- * @returns {Promise<boolean>} True if deleted, false if not
+ * @returns <Promise<boolean>> True if deleted, false if not
  */
 async function purgeVectorIndex(collectionId) {
     try {
@@ -1167,18 +1089,6 @@ async function purgeVectorIndex(collectionId) {
             return true;
         }
 
-        // Try LanceDB backend first if enabled
-        if (settings.useLanceDB) {
-            try {
-                await lancedbBackend.purge(collectionId);
-                console.debug('Vectors: Using LanceDB backend for purgeVector');
-                return true;
-            } catch (error) {
-                console.warn('Vectors: LanceDB purge failed, falling back to API', error);
-            }
-        }
-
-        // Fallback to official API
         const response = await fetch('/api/vector/purge', {
             method: 'POST',
             headers: getRequestHeaders(),
@@ -1205,19 +1115,6 @@ async function purgeVectorIndex(collectionId) {
  */
 async function purgeAllVectorIndexes() {
     try {
-        // Try LanceDB backend first if enabled
-        if (settings.useLanceDB) {
-            try {
-                await lancedbBackend.purgeAll();
-                console.debug('Vectors: Using LanceDB backend for purgeAll');
-                toastr.success('All vector indexes purged (LanceDB)', 'Purge successful');
-                return;
-            } catch (error) {
-                console.warn('Vectors: LanceDB purgeAll failed, falling back to API', error);
-            }
-        }
-
-        // Fallback to official API
         const response = await fetch('/api/vector/purge-all', {
             method: 'POST',
             headers: getRequestHeaders(),
@@ -1302,54 +1199,17 @@ async function loadChutesModels() {
 function populateChutesModelSelect(models) {
     const select = $('#vectors_chutes_model');
     select.empty();
-
-    if (models.length === 0) {
-        select.append($('<option>').text('No models available'));
-        return;
-    }
-
-    for (const model of models) {
-        const option = $('<option>').val(model.id).text(model.id);
+    for (const m of models) {
+        const option = document.createElement('option');
+        option.value = m.slug;
+        option.text = m.name;
         select.append(option);
     }
+    if (!settings.chutes_model && models.length) {
+        settings.chutes_model = models[0].slug;
+    }
+    $('#vectors_chutes_model').val(settings.chutes_model);
 }
-
-// Initialize LanceDB Backend
-let lancedbBackend = null;
-
-/**
- * Initializes the LanceDB backend if enabled
- */
-async function initLanceDBBackend() {
-    if (!settings.useLanceDB) {
-        console.debug('Vectors: LanceDB backend disabled');
-        return;
-    }
-
-    if (lancedbBackend) {
-        console.debug('Vectors: LanceDB backend already initialized');
-        return;
-    }
-
-    try {
-        lancedbBackend = new LanceDBBackend({});
-        lancedbBackend.init(getRequestHeaders);
-
-        // Test connection
-        const health = await lancedbBackend.healthCheck();
-        if (health.healthy) {
-            console.log('Vectors: LanceDB backend initialized successfully:', health.message);
-        } else {
-            console.warn('Vectors: LanceDB backend warning:', health.message);
-        }
-    } catch (error) {
-        console.error('Vectors: Failed to initialize LanceDB backend:', error);
-    }
-}
-
-// Export for debugging
-window.initLanceDBBackend = initLanceDBBackend;
-window.getLanceDBBackend = () => lancedbBackend;
 
 async function loadNanoGPTModels() {
     try {
@@ -1840,15 +1700,10 @@ async function activateWorldInfo(chat) {
         return;
     }
 
-    // Mark activated entries
-    for (const entry of activatedEntries) {
-        entry.force_activation = true;
-    }
-
-    console.log(`Vectors: Activated ${activatedEntries.length} WI entries`);
+    console.log(`Vectors: Activated ${activatedEntries.length} WI entries`, activatedEntries);
+    await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activatedEntries);
 }
 
-// Initialize extension
 jQuery(async () => {
     if (!extension_settings.vectors) {
         extension_settings.vectors = settings;
@@ -1863,47 +1718,26 @@ jQuery(async () => {
 
     // Migrate from TensorFlow to Transformers
     settings.source = settings.source !== 'local' ? settings.source : 'transformers';
-
-    // Load settings HTML directly into extensions container
-    const settingsHtml = await fetch('settings.html')
-        .then(r => r.text());
-    $('#extensions_settings2').append(settingsHtml);
-
-    // LanceDB toggle
-    $('#vectors_use_lancedb').prop('checked', settings.useLanceDB).on('input', () => {
-        settings.useLanceDB = $('#vectors_use_lancedb').prop('checked');
-        Object.assign(extension_settings.vectors, settings);
-        saveSettingsDebounced();
-        if (settings.useLanceDB) {
-            initLanceDBBackend();
-        }
-    });
-
-    // Chat vectorization toggle
+    const template = await renderExtensionTemplateAsync(MODULE_NAME, 'settings');
+    $('#vectors_container').append(template);
     $('#vectors_enabled_chats').prop('checked', settings.enabled_chats).on('input', () => {
         settings.enabled_chats = $('#vectors_enabled_chats').prop('checked');
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
         toggleSettings();
     });
-
-    // File vectorization toggle
     $('#vectors_enabled_files').prop('checked', settings.enabled_files).on('input', () => {
         settings.enabled_files = $('#vectors_enabled_files').prop('checked');
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
         toggleSettings();
     });
-
-    // Vectorization source
     $('#vectors_source').val(settings.source).on('change', () => {
         settings.source = String($('#vectors_source').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
         toggleSettings();
     });
-
-    // Alternative endpoint
     $('#vector_altEndpointUrl_enabled').prop('checked', settings.use_alt_endpoint).on('input', () => {
         settings.use_alt_endpoint = $('#vector_altEndpointUrl_enabled').prop('checked');
         Object.assign(extension_settings.vectors, settings);
@@ -1914,8 +1748,6 @@ jQuery(async () => {
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
-
-    // Model selectors
     $('#vectors_togetherai_model').val(settings.togetherai_model).on('change', () => {
         settings.togetherai_model = String($('#vectors_togetherai_model').val());
         Object.assign(extension_settings.vectors, settings);
@@ -1971,8 +1803,6 @@ jQuery(async () => {
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
-
-    // Chat settings
     $('#vectors_template').val(settings.template).on('input', () => {
         settings.template = String($('#vectors_template').val());
         Object.assign(extension_settings.vectors, settings);
@@ -2004,150 +1834,164 @@ jQuery(async () => {
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
-
-    // Action buttons
     $('#vectors_vectorize_all').on('click', onVectorizeAllClick);
     $('#vectors_purge').on('click', onPurgeClick);
     $('#vectors_view_stats').on('click', onViewStatsClick);
     $('#vectors_files_vectorize_all').on('click', onVectorizeAllFilesClick);
     $('#vectors_files_purge').on('click', onPurgeFilesClick);
 
-    // File settings
     $('#vectors_size_threshold').val(settings.size_threshold).on('input', () => {
         settings.size_threshold = Number($('#vectors_size_threshold').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_chunk_size').val(settings.chunk_size).on('input', () => {
         settings.chunk_size = Number($('#vectors_chunk_size').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_chunk_count').val(settings.chunk_count).on('input', () => {
         settings.chunk_count = Number($('#vectors_chunk_count').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_include_wi').prop('checked', settings.include_wi).on('input', () => {
         settings.include_wi = !!$('#vectors_include_wi').prop('checked');
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_summarize').prop('checked', settings.summarize).on('input', () => {
         settings.summarize = !!$('#vectors_summarize').prop('checked');
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_summarize_user').prop('checked', settings.summarize_sent).on('input', () => {
         settings.summarize_sent = !!$('#vectors_summarize_user').prop('checked');
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_summary_source').val(settings.summary_source).on('change', () => {
         settings.summary_source = String($('#vectors_summary_source').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_summary_prompt').val(settings.summary_prompt).on('input', () => {
         settings.summary_prompt = String($('#vectors_summary_prompt').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_message_chunk_size').val(settings.message_chunk_size).on('input', () => {
         settings.message_chunk_size = Number($('#vectors_message_chunk_size').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
 
-    // Data Bank file settings
     $('#vectors_size_threshold_db').val(settings.size_threshold_db).on('input', () => {
         settings.size_threshold_db = Number($('#vectors_size_threshold_db').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_chunk_size_db').val(settings.chunk_size_db).on('input', () => {
         settings.chunk_size_db = Number($('#vectors_chunk_size_db').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_chunk_count_db').val(settings.chunk_count_db).on('input', () => {
         settings.chunk_count_db = Number($('#vectors_chunk_count_db').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_overlap_percent').val(settings.overlap_percent).on('input', () => {
         settings.overlap_percent = Number($('#vectors_overlap_percent').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_overlap_percent_db').val(settings.overlap_percent_db).on('input', () => {
         settings.overlap_percent_db = Number($('#vectors_overlap_percent_db').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_file_template_db').val(settings.file_template_db).on('input', () => {
         settings.file_template_db = String($('#vectors_file_template_db').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $(`input[name="vectors_file_position_db"][value="${settings.file_position_db}"]`).prop('checked', true);
     $('input[name="vectors_file_position_db"]').on('change', () => {
         settings.file_position_db = Number($('input[name="vectors_file_position_db"]:checked').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_file_depth_db').val(settings.file_depth_db).on('input', () => {
         settings.file_depth_db = Number($('#vectors_file_depth_db').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_file_depth_role_db').val(settings.file_depth_role_db).on('input', () => {
         settings.file_depth_role_db = Number($('#vectors_file_depth_role_db').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_translate_files').prop('checked', settings.translate_files).on('input', () => {
         settings.translate_files = !!$('#vectors_translate_files').prop('checked');
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
 
-    // World Info settings
     $('#vectors_enabled_world_info').prop('checked', settings.enabled_world_info).on('input', () => {
         settings.enabled_world_info = !!$('#vectors_enabled_world_info').prop('checked');
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
         toggleSettings();
     });
+
     $('#vectors_enabled_for_all').prop('checked', settings.enabled_for_all).on('input', () => {
         settings.enabled_for_all = !!$('#vectors_enabled_for_all').prop('checked');
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_max_entries').val(settings.max_entries).on('input', () => {
         settings.max_entries = Number($('#vectors_max_entries').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
 
-    // Score threshold and chunk delimiter
     $('#vectors_score_threshold').val(settings.score_threshold).on('input', () => {
         settings.score_threshold = Number($('#vectors_score_threshold').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_force_chunk_delimiter').val(settings.force_chunk_delimiter).on('input', () => {
         settings.force_chunk_delimiter = String($('#vectors_force_chunk_delimiter').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_only_custom_boundary').prop('checked', settings.only_custom_boundary).on('input', () => {
         settings.only_custom_boundary = !!$('#vectors_only_custom_boundary').prop('checked');
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
 
-    // Ollama pull link
     $('#vectors_ollama_pull').on('click', (e) => {
         const presetModel = extension_settings.vectors.ollama_model || '';
         e.preventDefault();
@@ -2155,7 +1999,6 @@ jQuery(async () => {
         $('#dialogue_popup_input').val(presetModel);
     });
 
-    // WebLLM links
     $('#vectors_webllm_install').on('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -2167,25 +2010,25 @@ jQuery(async () => {
 
         openThirdPartyExtensionMenu('https://github.com/SillyTavern/Extension-WebLLM');
     });
+
     $('#vectors_webllm_model').on('input', () => {
         settings.webllm_model = String($('#vectors_webllm_model').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
+
     $('#vectors_webllm_load').on('click', async () => {
         if (!settings.webllm_model) return;
         await webllmProvider.loadModel(settings.webllm_model);
         toastr.success('WebLLM model loaded');
     });
 
-    // Google model
     $('#vectors_google_model').val(settings.google_model).on('input', () => {
         settings.google_model = String($('#vectors_google_model').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
 
-    // NomicAI API key indicator
     $('#api_key_nomicai').toggleClass('success', !!secret_state[SECRET_KEYS.NOMICAI]);
     [event_types.SECRET_WRITTEN, event_types.SECRET_DELETED, event_types.SECRET_ROTATED].forEach(event => {
         eventSource.on(event, (/** @type {string} */ key) => {
@@ -2194,15 +2037,7 @@ jQuery(async () => {
         });
     });
 
-    // Initialize LanceDB backend if enabled
-    if (settings.useLanceDB) {
-        await initLanceDBBackend();
-    }
-
-    // Initialize settings UI visibility
     toggleSettings();
-
-    // Event listeners for chat changes
     eventSource.on(event_types.MESSAGE_DELETED, onChatEvent);
     eventSource.on(event_types.MESSAGE_EDITED, onChatEvent);
     eventSource.on(event_types.MESSAGE_SENT, onChatEvent);
@@ -2217,9 +2052,182 @@ jQuery(async () => {
         }
     });
 
-    // Register slash commands
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'vector-state',
+        name: 'db-ingest',
+        callback: async () => {
+            await ingestDataBankAttachments();
+            return '';
+        },
+        aliases: ['databank-ingest', 'data-bank-ingest'],
+        helpString: 'Force the ingestion of all Data Bank attachments.',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'db-purge',
+        callback: async () => {
+            const dataBank = getDataBankAttachments();
+
+            for (const file of dataBank) {
+                await purgeFileVectorIndex(file.url);
+            }
+
+            return '';
+        },
+        aliases: ['databank-purge', 'data-bank-purge'],
+        helpString: 'Purge the vector index for all Data Bank attachments.',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'db-search',
+        callback: async (args, query) => {
+            const clamp = (v) => Number.isNaN(v) ? null : Math.min(1, Math.max(0, v));
+            const threshold = clamp(Number(args?.threshold ?? settings.score_threshold));
+            const validateCount = (v) => Number.isNaN(v) || !Number.isInteger(v) || v < 1 ? null : v;
+            const count = validateCount(Number(args?.count)) ?? settings.chunk_count_db;
+            const source = String(args?.source ?? '');
+            const attachments = source ? getDataBankAttachmentsForSource(source, false) : getDataBankAttachments(false);
+            const collectionIds = await ingestDataBankAttachments(String(source));
+            const queryResults = await queryMultipleCollections(collectionIds, String(query), count, threshold);
+
+            // Get URLs
+            const urls = Object
+                .keys(queryResults)
+                .map(x => attachments.find(y => getFileCollectionId(y.url) === x))
+                .filter(x => x)
+                .map(x => x.url);
+
+            // Gets the actual text content of chunks
+            const getChunksText = () => {
+                let textResult = '';
+                for (const collectionId in queryResults) {
+                    const metadata = queryResults[collectionId].metadata?.filter(x => x.text)?.sort((a, b) => a.index - b.index)?.map(x => x.text)?.filter(onlyUnique) || [];
+                    textResult += metadata.join('\n') + '\n\n';
+                }
+                return textResult;
+            };
+            if (args.return === 'chunks') {
+                return getChunksText();
+            }
+
+            // @ts-ignore
+            return slashCommandReturnHelper.doReturn(args.return ?? 'object', urls, { objectToStringFunc: list => list.join('\n') });
+        },
+        aliases: ['databank-search', 'data-bank-search'],
+        helpString: 'Search the Data Bank for a specific query using vector similarity. Returns a list of file URLs with the most relevant content.',
+        namedArgumentList: [
+            new SlashCommandNamedArgument('threshold', 'Threshold for the similarity score in the [0, 1] range. Uses the global config value if not set.', ARGUMENT_TYPE.NUMBER, false, false, ''),
+            new SlashCommandNamedArgument('count', 'Maximum number of query results to return.', ARGUMENT_TYPE.NUMBER, false, false, ''),
+            new SlashCommandNamedArgument('source', 'Optional filter for the attachments by source.', ARGUMENT_TYPE.STRING, false, false, '', ['global', 'character', 'chat']),
+            SlashCommandNamedArgument.fromProps({
+                name: 'return',
+                description: 'How you want the return value to be provided',
+                typeList: [ARGUMENT_TYPE.STRING],
+                defaultValue: 'object',
+                enumList: [
+                    new SlashCommandEnumValue('chunks', 'Return the actual content chunks', enumTypes.enum, '{}'),
+                    ...slashCommandReturnHelper.enumList({ allowObject: true }),
+                ],
+                forceEnum: true,
+            }),
+        ],
+        unnamedArgumentList: [
+            new SlashCommandArgument('Query to search by.', ARGUMENT_TYPE.STRING, true, false),
+        ],
+        returns: ARGUMENT_TYPE.LIST,
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'vector-threshold',
+        helpString: 'Set the vector score threshold or return the current threshold if no argument is provided.',
+        returns: 'score threshold value',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'Score threshold (number).',
+                typeList: [ARGUMENT_TYPE.NUMBER],
+            }),
+        ],
+        callback: async (_args, value) => {
+            const raw = String(value ?? '').trim();
+            if (!raw) {
+                return String(settings.score_threshold);
+            }
+
+            const parsed = Number(raw);
+            if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+                toastr.warning('Score threshold must be a number between 0 and 1.');
+                return '';
+            }
+
+            $('#vectors_score_threshold')
+                .val(parsed)
+                .trigger('input');
+
+            return String(settings.score_threshold);
+        },
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'vector-query',
+        helpString: 'Set the vector query messages or returns the current query messages count if no argument is provided',
+        returns: 'the query messages value',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'Query messages (number > 0).',
+                typeList: [ARGUMENT_TYPE.NUMBER],
+            }),
+        ],
+        callback: async (_args, value) => {
+            const raw = String(value ?? '').trim();
+            if (!raw) {
+                return String(settings.query);
+            }
+
+            const parsed = Number(raw);
+            if (!Number.isFinite(parsed) || parsed <= 0) {
+                toastr.warning('Query messages must be a number greater than 0.');
+                return '';
+            }
+
+            $('#vectors_query')
+                .val(parsed)
+                .trigger('input');
+
+            return String(settings.query);
+        },
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'vector-max-entries',
+        helpString: 'Set the vector world info max entries or returns the current max entries if no argument is provided',
+        returns: 'world info max entries',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'Max entries (number > 0).',
+                typeList: [ARGUMENT_TYPE.NUMBER],
+            }),
+        ],
+        callback: async (_args, value) => {
+            const raw = String(value ?? '').trim();
+            if (!raw) {
+                return String(settings.max_entries);
+            }
+
+            const parsed = Number(raw);
+            if (!Number.isFinite(parsed) || parsed <= 0) {
+                toastr.warning('Max entries must be a number greater than 0.');
+                return '';
+            }
+
+            $('#vectors_max_entries')
+                .val(parsed)
+                .trigger('input');
+
+            return String(settings.max_entries);
+        },
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'vector-chats-state',
         helpString: 'Set whether chat vectorization is enabled or return the current boolean if no argument is provided',
         returns: 'boolean for if chat vectorization is enabled',
         unnamedArgumentList: [
@@ -2261,7 +2269,7 @@ jQuery(async () => {
                 return String(settings.enabled_files);
             }
 
-            const parsed = isTrueBoolean(raw);
+            const parsed = isTrueBoolean(raw) ;
             $('#vectors_enabled_files')
                 .prop('checked', parsed)
                 .trigger('input');

@@ -1,15 +1,14 @@
 {
-    "display_name": "Vector Storage - LanceDB",
+    "display_name": "Vector Storage (第三方)",
     "loading_order": 100,
     "requires": [],
     "optional": [
         "embeddings"
     ],
-    "generate_interceptor": "vectors_rearrangeChat",
+    "generate_interceptor": "vectors_rearrangeChat_thirdparty",
     "js": "index.js",
     "css": "style.css",
-    "author": "RoyChong5053",
-    "version": "1.0.0",
-    "homePage": "https://github.com/RoyChong5053/Vector-Storage-5053",
-    "description": "Vector Storage with LanceDB backend support for improved performance"
+    "author": "roychong",
+    "version": "1.0.0-thirdparty",
+    "homePage": "https://github.com/RoyChong5053/Vector-Storage-5053"
 }
